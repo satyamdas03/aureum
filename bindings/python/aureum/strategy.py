@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -15,11 +15,11 @@ class Strategy:
 
     api_version: str
     kind: str
-    metadata: Dict[str, Any]
-    spec: Dict[str, Any]
+    metadata: dict[str, Any]
+    spec: dict[str, Any]
 
     @classmethod
-    def from_yaml(cls, text: str) -> "Strategy":
+    def from_yaml(cls, text: str) -> Strategy:
         data = yaml.safe_load(text)
         return cls(
             api_version=data.get("apiVersion", ""),
@@ -29,13 +29,13 @@ class Strategy:
         )
 
     @classmethod
-    def from_file(cls, path: str | Path) -> "Strategy":
+    def from_file(cls, path: str | Path) -> Strategy:
         path = Path(path)
         return cls.from_yaml(path.read_text(encoding="utf-8"))
 
-    def validate(self) -> List[str]:
+    def validate(self) -> list[str]:
         """Return a list of validation errors, empty if valid."""
-        errors: List[str] = []
+        errors: list[str] = []
         if not self.metadata.get("name"):
             errors.append("metadata.name is required")
         spec = self.spec
@@ -51,7 +51,7 @@ class Strategy:
             errors.append("spec.execution is required")
         return errors
 
-    def constraints(self) -> List[Dict[str, Any]]:
+    def constraints(self) -> list[dict[str, Any]]:
         """Extract verifiable risk constraints."""
         risk = self.spec.get("risk", {})
         out = []
@@ -69,7 +69,7 @@ class Strategy:
                 )
         return out
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "apiVersion": self.api_version,
             "kind": self.kind,

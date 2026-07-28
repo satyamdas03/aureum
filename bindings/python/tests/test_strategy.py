@@ -4,7 +4,6 @@ from pathlib import Path
 
 from aureum.strategy import Strategy
 
-
 EXAMPLE = Path(__file__).parents[3] / "examples" / "strategies" / "momentum.yaml"
 
 

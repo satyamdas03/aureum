@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict
 
 
 class Dimension:
@@ -28,8 +27,8 @@ class Dimension:
 class Unit:
     """A unit expressed as a dimension raised to an integer power."""
 
-    def __init__(self, dims: Dict[Dimension, int] | None = None) -> None:
-        self.dims: Dict[Dimension, int] = {}
+    def __init__(self, dims: dict[Dimension, int] | None = None) -> None:
+        self.dims: dict[Dimension, int] = {}
         if dims:
             for dim, power in dims.items():
                 if power != 0:
@@ -37,26 +36,26 @@ class Unit:
             self.dims = {d: p for d, p in self.dims.items() if p != 0}
 
     @classmethod
-    def dimensionless(cls) -> "Unit":
+    def dimensionless(cls) -> Unit:
         return cls({})
 
     @classmethod
-    def base(cls, dim: Dimension) -> "Unit":
+    def base(cls, dim: Dimension) -> Unit:
         return cls({dim: 1})
 
-    def multiply(self, other: "Unit") -> "Unit":
+    def multiply(self, other: Unit) -> Unit:
         merged = dict(self.dims)
         for dim, power in other.dims.items():
             merged[dim] = merged.get(dim, 0) + power
         return Unit(merged)
 
-    def divide(self, other: "Unit") -> "Unit":
+    def divide(self, other: Unit) -> Unit:
         merged = dict(self.dims)
         for dim, power in other.dims.items():
             merged[dim] = merged.get(dim, 0) - power
         return Unit(merged)
 
-    def is_compatible(self, other: "Unit") -> bool:
+    def is_compatible(self, other: Unit) -> bool:
         return self.dims == other.dims
 
     def __eq__(self, other: object) -> bool:
@@ -95,10 +94,10 @@ class Quantity:
     source: str
 
     @classmethod
-    def dimensionless(cls, value: float, source: str = "") -> "Quantity":
+    def dimensionless(cls, value: float, source: str = "") -> Quantity:
         return cls(value, Unit.dimensionless(), source)
 
-    def add(self, other: "Quantity") -> "Quantity":
+    def add(self, other: Quantity) -> Quantity:
         if not self.unit.is_compatible(other.unit):
             raise ValueError(
                 f"dimension mismatch: cannot add {self.unit} to {other.unit}"
@@ -109,14 +108,14 @@ class Quantity:
             f"({self.source} + {other.source})",
         )
 
-    def multiply(self, other: "Quantity") -> "Quantity":
+    def multiply(self, other: Quantity) -> Quantity:
         return Quantity(
             self.value * other.value,
             self.unit.multiply(other.unit),
             f"({self.source} * {other.source})",
         )
 
-    def divide(self, other: "Quantity") -> "Quantity":
+    def divide(self, other: Quantity) -> Quantity:
         if other.value == 0:
             raise ZeroDivisionError("division by zero quantity")
         return Quantity(

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Any, Dict, List, Set
+from typing import Any
 
 
 class NodeId:
@@ -14,7 +14,7 @@ class NodeId:
         self.value = value
 
     @classmethod
-    def from_content(cls, content: str) -> "NodeId":
+    def from_content(cls, content: str) -> NodeId:
         digest = hashlib.sha256(content.encode()).hexdigest()[:16]
         return cls(f"node_{digest}")
 
@@ -48,8 +48,8 @@ class Dag:
     """A deterministic computation DAG."""
 
     def __init__(self) -> None:
-        self._nodes: Dict[NodeId, Node] = {}
-        self._edges: Dict[NodeId, Set[NodeId]] = {}
+        self._nodes: dict[NodeId, Node] = {}
+        self._edges: dict[NodeId, set[NodeId]] = {}
 
     def insert(self, node: Node) -> NodeId:
         node_id = node.node_id()
@@ -70,8 +70,8 @@ class Dag:
             raise ValueError("cyclic dependency detected")
 
     def _has_cycle(self, start: NodeId) -> bool:
-        visited: Set[NodeId] = set()
-        stack: Set[NodeId] = set()
+        visited: set[NodeId] = set()
+        stack: set[NodeId] = set()
 
         def visit(node: NodeId) -> bool:
             if node in stack:
@@ -91,7 +91,7 @@ class Dag:
     def node(self, node_id: NodeId) -> Node | None:
         return self._nodes.get(node_id)
 
-    def nodes(self) -> List[tuple[NodeId, Node]]:
+    def nodes(self) -> list[tuple[NodeId, Node]]:
         return list(self._nodes.items())
 
     def __repr__(self) -> str:
