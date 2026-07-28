@@ -22,7 +22,7 @@ pip install aureum
 from aureum import Strategy
 
 strategy = Strategy.from_yaml("examples/strategies/momentum.yaml")
-report = strategy.backtest(data="data/prices.parquet")
+report = strategy.backtest(data="examples/data/prices.parquet")
 report.summary()
 ```
 
@@ -30,4 +30,4 @@ report.summary()
 
 - [Architecture](../ARCHITECTURE.md)
 - [Contributing](../CONTRIBUTING.md)
-- [GitHub](https://github.com/point/aureum)
+- [GitHub](https://github.com/satyamdas03/aureum)

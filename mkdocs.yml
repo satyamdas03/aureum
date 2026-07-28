@@ -1,6 +1,7 @@
 site_name: Aureum Documentation
 site_description: Self-proving semantic kernel for finance
 site_author: Satyam Das
+docs_dir: docs
 theme:
   name: material
   palette:
@@ -25,7 +26,7 @@ theme:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/point/aureum
+      link: https://github.com/satyamdas03/aureum
 
 markdown_extensions:
   - pymdownx.highlight:
