@@ -25,7 +25,7 @@ impl NodeId {
 }
 
 /// A node in the computation DAG.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Node {
     /// A constant value with provenance.
     Constant(Quantity),

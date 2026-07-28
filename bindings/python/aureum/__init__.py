@@ -9,4 +9,4 @@ from .dag import Dag, Node
 from .quantity import Dimension, Quantity, Unit
 from .strategy import Strategy
 
-__all__ = ["Strategy", "Quantity", "Unit", "Dimension", "Dag", "Node"]
+__all__ = ["Dag", "Dimension", "Node", "Quantity", "Strategy", "Unit"]

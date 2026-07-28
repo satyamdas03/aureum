@@ -14,7 +14,7 @@ from .strategy import Strategy
 @click.version_option(version="0.1.0")
 def cli():
     """Aureum — self-proving semantic kernel for finance."""
-    pass
+    ...
 
 
 @cli.command()
@@ -65,7 +65,7 @@ def backtest(path: Path, data: Path | None, output: Path | None) -> None:
         try:
             output.write_text(report_json, encoding="utf-8")
             print(f"Report written to {output.resolve()}")
-        except Exception as e:
+        except OSError as e:
             print(f"Failed to write report: {e}")
             raise click.Abort()
     else:
