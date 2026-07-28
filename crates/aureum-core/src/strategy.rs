@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 /// Top-level strategy document.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Strategy {
+    #[serde(rename = "apiVersion")]
     pub api_version: String,
     pub kind: String,
     pub metadata: Metadata,
