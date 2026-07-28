@@ -12,11 +12,15 @@ use pyo3::prelude::*;
 fn parse_strategy_yaml(yaml: String) -> PyResult<String> {
     Strategy::from_yaml(&yaml)
         .map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("failed to parse strategy: {e}"))
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "failed to parse strategy: {e}"
+            ))
         })
         .and_then(|strategy| {
             serde_json::to_string_pretty(&strategy).map_err(|e| {
-                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("serialization failed: {e}"))
+                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                    "serialization failed: {e}"
+                ))
             })
         })
 }
