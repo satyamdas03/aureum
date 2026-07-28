@@ -76,7 +76,7 @@ pub struct Ranking {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "kind")]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Weights {
     Equal { top_n: f64 },
     RankScale { top_n: f64 },
