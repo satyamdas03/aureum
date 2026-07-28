@@ -6,8 +6,6 @@ import hashlib
 from dataclasses import dataclass
 from typing import Any, Dict, List, Set
 
-from .quantity import Quantity
-
 
 class NodeId:
     """Content-addressed node identifier."""

@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 
 import click
-import yaml
 
 from .strategy import Strategy
 
