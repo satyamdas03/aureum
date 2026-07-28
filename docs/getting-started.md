@@ -26,5 +26,5 @@ aureum backtest examples/strategies/momentum.yaml --data data/prices.parquet
 ## Next steps
 
 - Read the [DSL reference](./dsl.md)
-- Explore the [architecture](../ARCHITECTURE.md)
+- Explore the [architecture](./architecture.md)
 - Join the community on GitHub

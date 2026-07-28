@@ -28,6 +28,6 @@ report.summary()
 
 ## Learn more
 
-- [Architecture](../ARCHITECTURE.md)
-- [Contributing](../CONTRIBUTING.md)
+- [Architecture](./architecture.md)
+- [Contributing](./contributing.md)
 - [GitHub](https://github.com/satyamdas03/aureum)

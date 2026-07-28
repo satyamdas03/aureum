@@ -121,8 +121,8 @@ impl Strategy {
     pub fn from_yaml(yaml: &str) -> anyhow::Result<Self> {
         let mut doc: Strategy = serde_yaml::from_str(yaml)?;
         // Normalize defaults after parsing.
-        if doc.audit.lineage.is_empty() {
-            doc.audit.lineage = "full".to_string();
+        if doc.spec.audit.lineage.is_empty() {
+            doc.spec.audit.lineage = "full".to_string();
         }
         Ok(doc)
     }

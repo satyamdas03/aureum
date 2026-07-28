@@ -45,3 +45,6 @@ data/
 *.csv
 *.h5
 *.db
+
+# MkDocs build output
+site/
