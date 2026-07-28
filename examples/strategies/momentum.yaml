@@ -16,7 +16,7 @@ spec:
     filter:
       sector: Technology
       min_price: 5.00
-      min_adv20: 1_000_000
+      min_adv20: 1000000
 
   schedule:
     rebalance: 1M

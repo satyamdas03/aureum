@@ -14,7 +14,6 @@ from .strategy import Strategy
 @click.version_option(version="0.1.0")
 def cli():
     """Aureum — self-proving semantic kernel for finance."""
-    ...
 
 
 @cli.command()
