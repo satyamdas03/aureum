@@ -1,8 +1,7 @@
 //! PyO3 bindings for the Aureum core engine.
 
-use aureum_core::{quantity::*, strategy::*, Dag, Node, NodeId, Quantity, Strategy};
+use aureum_core::{Dag, Node, NodeId, Quantity, Strategy};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
 
 /// Parse a strategy YAML string into a Python dict representation.
 #[pyfunction]

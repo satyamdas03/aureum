@@ -129,7 +129,7 @@ impl Dag {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Dimension, Quantity, Unit};
+    use crate::Quantity;
 
     #[test]
     fn test_dag_insert_and_connect() {
