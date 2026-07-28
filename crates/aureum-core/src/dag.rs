@@ -84,7 +84,7 @@ impl Dag {
         let id = node.id();
         if let Some(existing) = self.index.get(&id) {
             // Content-addressed: same content = same node.
-            if &self.graph[*existing] != &node {
+            if self.graph[*existing] != node {
                 // Should be impossible if id is a true hash.
                 panic!("content-address collision detected");
             }
@@ -108,10 +108,9 @@ impl Dag {
         self.graph.add_edge(*from_idx, *to_idx, ());
         if petgraph::algo::is_cyclic_directed(&self.graph) {
             // Remove the edge we just added.
-            self.graph.find_edge(*from_idx, *to_idx).and_then(|e| {
+            if let Some(e) = self.graph.find_edge(*from_idx, *to_idx) {
                 self.graph.remove_edge(e);
-                Some(())
-            });
+            }
             return Err(AureumError::CyclicDependency);
         }
         Ok(())

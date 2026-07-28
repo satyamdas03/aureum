@@ -1,24 +1,30 @@
 //! PyO3 bindings for the Aureum core engine.
 
+// PyO3 macros internally convert `PyResult<T>` / `Result<T, PyErr>` to Python
+// exceptions; clippy 1.97 flags the identity conversion as useless.
+#![allow(clippy::useless_conversion)]
+
 use aureum_core::{Dag, Node, NodeId, Quantity, Strategy};
 use pyo3::prelude::*;
 
 /// Parse a strategy YAML string into a Python dict representation.
 #[pyfunction]
 fn parse_strategy_yaml(yaml: String) -> PyResult<String> {
-    let strategy = Strategy::from_yaml(&yaml).map_err(|e| {
-        PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("failed to parse strategy: {e}"))
-    })?;
-    serde_json::to_string_pretty(&strategy).map_err(|e| {
-        PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("serialization failed: {e}"))
-    })
+    Strategy::from_yaml(&yaml)
+        .map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("failed to parse strategy: {e}"))
+        })
+        .and_then(|strategy| {
+            serde_json::to_string_pretty(&strategy).map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("serialization failed: {e}"))
+            })
+        })
 }
 
 /// Create a dimensionless quantity (for testing).
 #[pyfunction]
 fn make_quantity(value: f64, source: String) -> PyResult<String> {
-    let q = Quantity::dimensionless(value, source);
-    serde_json::to_string_pretty(&q).map_err(|e| {
+    serde_json::to_string_pretty(&Quantity::dimensionless(value, source)).map_err(|e| {
         PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("serialization failed: {e}"))
     })
 }
