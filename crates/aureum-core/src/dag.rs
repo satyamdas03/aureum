@@ -20,7 +20,10 @@ impl NodeId {
         let mut hasher = Sha256::new();
         hasher.update(content.as_bytes());
         let result = hasher.finalize();
-        Self(format!("node_{:016x}", u128::from_be_bytes(result[..16].try_into().unwrap())))
+        Self(format!(
+            "node_{:016x}",
+            u128::from_be_bytes(result[..16].try_into().unwrap())
+        ))
     }
 }
 
@@ -41,7 +44,9 @@ pub enum Node {
 impl Node {
     pub fn id(&self) -> NodeId {
         match self {
-            Node::Constant(q) => NodeId::from_content(&format!("const:{}", serde_json::to_string(q).unwrap())),
+            Node::Constant(q) => {
+                NodeId::from_content(&format!("const:{}", serde_json::to_string(q).unwrap()))
+            }
             Node::Transform { name, inputs, body } => {
                 let mut content = name.clone();
                 for input in inputs {
@@ -103,12 +108,10 @@ impl Dag {
         self.graph.add_edge(*from_idx, *to_idx, ());
         if petgraph::algo::is_cyclic_directed(&self.graph) {
             // Remove the edge we just added.
-            self.graph
-                .find_edge(*from_idx, *to_idx)
-                .and_then(|e| {
-                    self.graph.remove_edge(e);
-                    Some(())
-                });
+            self.graph.find_edge(*from_idx, *to_idx).and_then(|e| {
+                self.graph.remove_edge(e);
+                Some(())
+            });
             return Err(AureumError::CyclicDependency);
         }
         Ok(())

@@ -24,9 +24,18 @@ pub enum Operator {
 /// Result of a verification attempt.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Verdict {
-    Proven { constraint: String, explanation: String },
-    Refuted { constraint: String, counterexample: String },
-    Unknown { constraint: String, reason: String },
+    Proven {
+        constraint: String,
+        explanation: String,
+    },
+    Refuted {
+        constraint: String,
+        counterexample: String,
+    },
+    Unknown {
+        constraint: String,
+        reason: String,
+    },
 }
 
 /// Trait for verifier backends (Lean 4, SMT, etc.).

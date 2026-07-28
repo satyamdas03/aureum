@@ -35,7 +35,9 @@ impl Unit {
     }
 
     pub fn base(dim: Dimension) -> Self {
-        Self { dims: vec![(dim, 1)] }
+        Self {
+            dims: vec![(dim, 1)],
+        }
     }
 
     pub fn multiply(&self, other: &Self) -> Self {

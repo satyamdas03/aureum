@@ -42,7 +42,8 @@ impl PyDag {
         Ok(id.0)
     }
 
-    fn insert_transform(&mut self,
+    fn insert_transform(
+        &mut self,
         name: String,
         inputs: Vec<String>,
         body: String,
@@ -57,7 +58,12 @@ impl PyDag {
     }
 
     fn nodes(&self) -> PyResult<Vec<String>> {
-        Ok(self.dag.nodes().into_iter().map(|(id, _)| id.0.clone()).collect())
+        Ok(self
+            .dag
+            .nodes()
+            .into_iter()
+            .map(|(id, _)| id.0.clone())
+            .collect())
     }
 }
 
