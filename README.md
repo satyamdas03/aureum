@@ -88,7 +88,7 @@ Aureum unifies finance under one **self-proving semantic substrate**:
 
 ```bash
 pip install aureum
-aureum backtest examples/strategies/momentum.yaml --data examples/data/prices.parquet
+aureum backtest examples/strategies/momentum.yaml --data examples/data/synthetic_prices.csv
 ```
 
 **Or describe a strategy in plain English and let Aureum build it:**

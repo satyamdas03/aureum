@@ -1,0 +1,400 @@
+"""Deterministic backtest runner for the Aureum Quant Kernel.
+
+This MVP implementation is intentionally dependency-light: it uses only the
+standard library plus PyYAML (already required).  A future iteration can swap
+the CSV store for Polars/Pandas or the Rust execution engine.
+"""
+
+from __future__ import annotations
+
+import csv
+import datetime as dt
+import math
+from collections import defaultdict
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Callable
+
+from .strategy import Strategy
+
+
+SignalFn = Callable[[list[float]], float]
+
+
+def _momentum_12_1(closes: list[float]) -> float:
+    """12-month total return minus the most recent month total return.
+
+    Expects ``closes`` ordered from oldest to newest, where the last element
+    is the current close.  Needs at least 252 historical closes preceding the
+    current one (253 total).
+    """
+    if len(closes) < 253:
+        return float("nan")
+    current = closes[-1]
+    month_ago = closes[-22]  # ~21 trading days + current
+    year_ago = closes[-253]  # ~252 trading days + current
+    return (current / year_ago - 1.0) - (current / month_ago - 1.0)
+
+
+# Registry of named signals referenced by ``spec.ranking.by``.
+_SIGNALS: dict[str, SignalFn] = {
+    "momentum_12_1": _momentum_12_1,
+}
+
+
+class MarketData:
+    """In-memory CSV price store with deterministic ordering."""
+
+    def __init__(self, rows: list[dict[str, str]]) -> None:
+        by_symbol: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        all_dates: set[dt.date] = set()
+
+        for row in rows:
+            date = dt.date.fromisoformat(row["date"])
+            symbol = row["symbol"]
+            close = float(row["close"])
+            volume = int(row["volume"])
+            sector = row.get("sector", "")
+            all_dates.add(date)
+            by_symbol[symbol].append(
+                {"date": date, "close": close, "volume": volume, "sector": sector}
+            )
+
+        for symbol in by_symbol:
+            by_symbol[symbol].sort(key=lambda r: r["date"])
+
+        self._by_symbol: dict[str, list[dict[str, Any]]] = dict(by_symbol)
+        self._symbols = sorted(self._by_symbol.keys())
+        self._dates = sorted(all_dates)
+
+        self._price_index: dict[tuple[dt.date, str], dict[str, Any]] = {}
+        for symbol, records in self._by_symbol.items():
+            for rec in records:
+                self._price_index[(rec["date"], symbol)] = rec
+
+    @classmethod
+    def from_csv(cls, path: str | Path) -> MarketData:
+        with Path(path).open(encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        return cls(rows)
+
+    @property
+    def dates(self) -> list[dt.date]:
+        return self._dates.copy()
+
+    @property
+    def symbols(self) -> list[str]:
+        return self._symbols.copy()
+
+    def price(self, date: dt.date, symbol: str) -> float | None:
+        rec = self._price_index.get((date, symbol))
+        return rec["close"] if rec else None
+
+    def volume(self, date: dt.date, symbol: str) -> int | None:
+        rec = self._price_index.get((date, symbol))
+        return rec["volume"] if rec else None
+
+    def sector(self, symbol: str) -> str | None:
+        recs = self._by_symbol.get(symbol)
+        return recs[0]["sector"] if recs else None
+
+    def closes(self, symbol: str) -> list[float]:
+        return [rec["close"] for rec in self._by_symbol.get(symbol, [])]
+
+    def closes_up_to(self, date: dt.date, symbol: str) -> list[float]:
+        out = []
+        for rec in self._by_symbol.get(symbol, []):
+            if rec["date"] <= date:
+                out.append(rec["close"])
+            else:
+                break
+        return out
+
+
+@dataclass
+class BacktestResult:
+    """Serializable backtest report."""
+
+    strategy_name: str
+    data_source: str
+    start_date: str
+    end_date: str
+    initial_nav: float
+    final_nav: float
+    total_return: float
+    cagr: float
+    volatility_annual: float
+    sharpe_ratio: float | None
+    max_drawdown: float
+    trades: int
+    turnover_annual: float
+    daily_nav: list[dict[str, Any]] = field(default_factory=list)
+    rebalance_log: list[dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "strategy": self.strategy_name,
+            "data_source": self.data_source,
+            "start_date": self.start_date,
+            "end_date": self.end_date,
+            "initial_nav": round(self.initial_nav, 4),
+            "final_nav": round(self.final_nav, 4),
+            "total_return": round(self.total_return, 6),
+            "cagr": round(self.cagr, 6),
+            "volatility_annual": round(self.volatility_annual, 6),
+            "sharpe_ratio": round(self.sharpe_ratio, 4) if self.sharpe_ratio is not None else None,
+            "max_drawdown": round(self.max_drawdown, 6),
+            "trades": self.trades,
+            "turnover_annual": round(self.turnover_annual, 6),
+            "daily_nav": self.daily_nav,
+            "rebalance_log": self.rebalance_log,
+        }
+
+
+class BacktestRunner:
+    """Run a strategy against a CSV price history."""
+
+    def __init__(
+        self,
+        strategy: Strategy,
+        data: MarketData,
+        *,
+        data_source: str = "csv",
+        initial_nav: float = 1_000_000.0,
+    ) -> None:
+        self.strategy = strategy
+        self.data = data
+        self.data_source = data_source
+        self.initial_nav = initial_nav
+
+    def run(self) -> BacktestResult:
+        spec = self.strategy.spec
+        ranking = spec["ranking"]
+        weights = spec["weights"]
+        universe = spec["universe"]
+        execution = spec["execution"]
+
+        signal_name = ranking["by"]
+        ascending = ranking.get("ascending", False)
+        top_n = weights.get("top_n", 1.0)
+        slippage = execution.get("slippage", 0.0)
+
+        signal_fn = _SIGNALS.get(signal_name)
+        if signal_fn is None:
+            raise ValueError(f"unknown signal: {signal_name!r}")
+
+        positions: dict[str, float] = {}
+        cash = self.initial_nav
+        daily_nav: list[dict[str, Any]] = []
+        rebalance_log: list[dict[str, Any]] = []
+        trades = 0
+        cumulative_turnover = 0.0
+
+        rebalance_dates = self._rebalance_dates()
+
+        for date in self.data.dates:
+            nav = self._portfolio_value(date, positions, cash)
+            daily_nav.append({"date": date.isoformat(), "nav": round(nav, 4)})
+
+            if date in rebalance_dates:
+                candidates = self._eligible_universe(date, universe)
+                scores: dict[str, float] = {}
+                for symbol in candidates:
+                    closes = self.data.closes_up_to(date, symbol)
+                    score = signal_fn(closes)
+                    if not math.isnan(score):
+                        scores[symbol] = score
+
+                if not scores:
+                    continue
+
+                ranked = sorted(
+                    scores.items(), key=lambda item: item[1], reverse=not ascending
+                )
+                select_count = max(1, int(round(len(ranked) * top_n)))
+                selected = [symbol for symbol, _ in ranked[:select_count]]
+
+                target_weight = 1.0 / len(selected)
+                target_values = {s: nav * target_weight for s in selected}
+
+                new_positions: dict[str, float] = {}
+                new_cash = cash
+                turnover_notional = 0.0
+                relevant_symbols = set(selected) | set(positions.keys())
+                for symbol in relevant_symbols:
+                    price = self.data.price(date, symbol)
+                    if price is None or price <= 0:
+                        continue
+
+                    target_value = target_values.get(symbol, 0.0)
+                    target_shares = target_value / price
+                    current_shares = positions.get(symbol, 0.0)
+                    delta_shares = target_shares - current_shares
+
+                    if delta_shares > 0:
+                        exec_price = price * (1.0 + slippage)
+                    else:
+                        exec_price = price * (1.0 - slippage)
+
+                    adjusted_delta = target_value / exec_price - current_shares
+                    new_positions[symbol] = current_shares + adjusted_delta
+                    cash_spent = adjusted_delta * exec_price
+                    new_cash -= cash_spent
+
+                    if abs(adjusted_delta) > 1e-9:
+                        trades += 1
+                    turnover_notional += abs(cash_spent)
+
+                positions = {
+                    s: v for s, v in new_positions.items() if abs(v) > 1e-9
+                }
+                cash = new_cash
+                cumulative_turnover += turnover_notional / nav if nav > 0 else 0.0
+
+                rebalance_log.append(
+                    {
+                        "date": date.isoformat(),
+                        "selected": selected,
+                        "scores": {s: round(scores[s], 6) for s in selected},
+                        "nav": round(nav, 4),
+                    }
+                )
+
+        final_nav = daily_nav[-1]["nav"] if daily_nav else self.initial_nav
+        total_return = final_nav / self.initial_nav - 1.0
+        cagr = self._cagr(total_return)
+        vol, sharpe = self._sharpe(daily_nav)
+        max_dd = self._max_drawdown(daily_nav)
+
+        return BacktestResult(
+            strategy_name=self.strategy.metadata.get("name", "unnamed"),
+            data_source=self.data_source,
+            start_date=self.data.dates[0].isoformat() if self.data.dates else "",
+            end_date=self.data.dates[-1].isoformat() if self.data.dates else "",
+            initial_nav=self.initial_nav,
+            final_nav=final_nav,
+            total_return=total_return,
+            cagr=cagr,
+            volatility_annual=vol,
+            sharpe_ratio=sharpe,
+            max_drawdown=max_dd,
+            trades=trades,
+            turnover_annual=cumulative_turnover,
+            daily_nav=daily_nav,
+            rebalance_log=rebalance_log,
+        )
+
+    def _rebalance_dates(self) -> set[dt.date]:
+        """Return the first trading day of each month after warm-up."""
+        schedule = self.strategy.spec.get("schedule", {})
+        frequency = schedule.get("rebalance", "1M")
+        lookback_text = schedule.get("lookback", "252d")
+        lookback_days = int(lookback_text.rstrip("d"))
+
+        dates = self.data.dates
+        if len(dates) <= lookback_days:
+            return set()
+
+        if frequency != "1M":
+            raise ValueError(f"unsupported rebalance frequency: {frequency!r}")
+
+        eligible = dates[lookback_days:]
+        rebalance_dates: set[dt.date] = set()
+        prev_month: tuple[int, int] | None = None
+        for date in eligible:
+            month_key = (date.year, date.month)
+            if month_key != prev_month:
+                rebalance_dates.add(date)
+                prev_month = month_key
+        return rebalance_dates
+
+    def _eligible_universe(
+        self, date: dt.date, universe_spec: dict[str, Any]
+    ) -> list[str]:
+        """Apply sector, price, and ADV filters at a point in time."""
+        filters = universe_spec.get("filter", {})
+        sector_filter = filters.get("sector")
+        min_price = filters.get("min_price")
+        min_adv20 = filters.get("min_adv20")
+
+        eligible: list[str] = []
+        for symbol in self.data.symbols:
+            if sector_filter and self.data.sector(symbol) != sector_filter:
+                continue
+
+            price = self.data.price(date, symbol)
+            if price is None:
+                continue
+            if min_price is not None and price < min_price:
+                continue
+
+            if min_adv20 is not None:
+                adv = self._adv20(date, symbol)
+                if adv is None or adv < min_adv20:
+                    continue
+
+            eligible.append(symbol)
+        return eligible
+
+    def _adv20(self, date: dt.date, symbol: str) -> float | None:
+        """Trailing 20-trading-day average dollar volume."""
+        records = self.data._by_symbol.get(symbol, [])
+        idx = next(
+            (i for i, rec in enumerate(records) if rec["date"] == date),
+            None,
+        )
+        if idx is None or idx < 19:
+            return None
+        window = records[idx - 19 : idx + 1]
+        return sum(rec["close"] * rec["volume"] for rec in window) / len(window)
+
+    def _portfolio_value(
+        self, date: dt.date, positions: dict[str, float], cash: float
+    ) -> float:
+        value = cash
+        for symbol, shares in positions.items():
+            price = self.data.price(date, symbol)
+            if price is not None:
+                value += shares * price
+        return value
+
+    def _cagr(self, total_return: float) -> float:
+        dates = self.data.dates
+        if len(dates) < 2:
+            return 0.0
+        years = (dates[-1] - dates[0]).days / 365.25
+        if years <= 0:
+            return 0.0
+        return (1.0 + total_return) ** (1.0 / years) - 1.0
+
+    def _sharpe(
+        self, daily_nav: list[dict[str, Any]]
+    ) -> tuple[float, float | None]:
+        returns = []
+        for prev, cur in zip(daily_nav, daily_nav[1:]):
+            if prev["nav"] > 0:
+                returns.append(cur["nav"] / prev["nav"] - 1.0)
+        if len(returns) < 2:
+            return 0.0, None
+        mean = sum(returns) / len(returns)
+        variance = sum((r - mean) ** 2 for r in returns) / (len(returns) - 1)
+        std = math.sqrt(variance)
+        if std == 0:
+            return 0.0, None
+        annual_std = std * math.sqrt(252)
+        annual_mean = mean * 252
+        return annual_std, annual_mean / annual_std
+
+    def _max_drawdown(self, daily_nav: list[dict[str, Any]]) -> float:
+        peak = -float("inf")
+        max_dd = 0.0
+        for point in daily_nav:
+            nav = point["nav"]
+            if nav > peak:
+                peak = nav
+            if peak > 0:
+                dd = (peak - nav) / peak
+                if dd > max_dd:
+                    max_dd = dd
+        return max_dd

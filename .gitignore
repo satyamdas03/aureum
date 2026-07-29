@@ -46,5 +46,10 @@ data/
 *.h5
 *.db
 
+# Allow committed example data and its generator.
+!examples/data/
+!examples/data/*.csv
+!examples/data/*.py
+
 # MkDocs build output
 site/

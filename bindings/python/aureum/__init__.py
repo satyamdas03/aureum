@@ -5,8 +5,18 @@ will be backed by the Rust `aureum-core` crate via PyO3; the pure-Python
 implementation below is the MVP scaffolding.
 """
 
+from .backtest import BacktestRunner, MarketData
 from .dag import Dag, Node
 from .quantity import Dimension, Quantity, Unit
 from .strategy import Strategy
 
-__all__ = ["Dag", "Dimension", "Node", "Quantity", "Strategy", "Unit"]
+__all__ = [
+    "BacktestRunner",
+    "Dag",
+    "Dimension",
+    "MarketData",
+    "Node",
+    "Quantity",
+    "Strategy",
+    "Unit",
+]

@@ -8,10 +8,10 @@
 - [ ] Public GitHub repo
 
 ## Phase 1: Quant Kernel MVP
-- [ ] Strategy DSL parser
+- [x] Strategy DSL parser
 - [ ] Deterministic DAG evaluator
-- [ ] CSV/Parquet data source
-- [ ] Simple backtest runner
+- [x] CSV/Parquet data source
+- [x] Simple backtest runner
 - [ ] Lineage snapshot export
 
 ## Phase 2: Formal Guardrails

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import click
 
+from .backtest import BacktestRunner, MarketData
 from .strategy import Strategy
 
 
@@ -44,32 +45,36 @@ def backtest(path: Path, data: Path | None, output: Path | None) -> None:
             click.echo(f"  - {error}")
         raise click.Abort()
 
-    print(f"Running backtest for '{strategy.metadata['name']}'...")
-    print(f"Data source: {data if data else 'synthetic'}")
+    data_source = str(data) if data else "synthetic"
+    click.echo(f"Running backtest for '{strategy.metadata['name']}'...")
+    click.echo(f"Data source: {data_source}")
 
-    # Placeholder: full backtest engine to be implemented.
-    report = {
-        "strategy": strategy.metadata["name"],
-        "status": "completed",
-        "data_source": str(data) if data else "synthetic",
-        "constraints": strategy.constraints(),
-        "trades": 0,
-        "sharpe": None,
-        "max_drawdown": None,
-    }
+    if data is None:
+        click.echo("Error: --data is required for real backtests in this version.")
+        raise click.Abort()
 
-    report_json = json.dumps(report, indent=2)
+    market_data = MarketData.from_csv(data)
+    runner = BacktestRunner(
+        strategy, market_data, data_source=data_source, initial_nav=1_000_000.0
+    )
+    result = runner.run()
+
+    report_json = json.dumps(result.to_dict(), indent=2)
     if output:
         output = Path(output)
         try:
             output.write_text(report_json, encoding="utf-8")
-            print(f"Report written to {output.resolve()}")
+            click.echo(f"Report written to {output.resolve()}")
         except OSError as e:
-            print(f"Failed to write report: {e}")
+            click.echo(f"Failed to write report: {e}")
             raise click.Abort()
     else:
-        print(report_json)
+        click.echo(report_json)
 
 
 def main() -> None:
     cli()
+
+
+if __name__ == "__main__":
+    main()
