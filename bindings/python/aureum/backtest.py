@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import csv
 import datetime as dt
+import itertools
 import math
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from .strategy import Strategy
 
@@ -212,7 +214,7 @@ class BacktestRunner:
                 ranked = sorted(
                     scores.items(), key=lambda item: item[1], reverse=not ascending
                 )
-                select_count = max(1, int(round(len(ranked) * top_n)))
+                select_count = max(1, round(len(ranked) * top_n))
                 selected = [symbol for symbol, _ in ranked[:select_count]]
 
                 target_weight = 1.0 / len(selected)
@@ -372,7 +374,7 @@ class BacktestRunner:
         self, daily_nav: list[dict[str, Any]]
     ) -> tuple[float, float | None]:
         returns = []
-        for prev, cur in zip(daily_nav, daily_nav[1:]):
+        for prev, cur in itertools.pairwise(daily_nav):
             if prev["nav"] > 0:
                 returns.append(cur["nav"] / prev["nav"] - 1.0)
         if len(returns) < 2:
@@ -391,10 +393,8 @@ class BacktestRunner:
         max_dd = 0.0
         for point in daily_nav:
             nav = point["nav"]
-            if nav > peak:
-                peak = nav
+            peak = max(peak, nav)
             if peak > 0:
                 dd = (peak - nav) / peak
-                if dd > max_dd:
-                    max_dd = dd
+                max_dd = max(max_dd, dd)
         return max_dd
