@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from click.testing import CliRunner
+
 from aureum.backtest import BacktestRunner, MarketData
 from aureum.cli import cli
 from aureum.strategy import Strategy

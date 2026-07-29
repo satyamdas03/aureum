@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .strategy import Strategy
+from aureum.strategy import Strategy
 
 
 SignalFn = Callable[[list[float]], float]
