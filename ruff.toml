@@ -1,2 +1,4 @@
+src = ["bindings/python"]
+
 [lint.isort]
 known-first-party = ["aureum"]

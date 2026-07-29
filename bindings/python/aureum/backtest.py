@@ -20,9 +20,6 @@ from typing import Any
 from aureum.strategy import Strategy
 
 
-SignalFn = Callable[[list[float]], float]
-
-
 def _momentum_12_1(closes: list[float]) -> float:
     """12-month total return minus the most recent month total return.
 
@@ -39,7 +36,7 @@ def _momentum_12_1(closes: list[float]) -> float:
 
 
 # Registry of named signals referenced by ``spec.ranking.by``.
-_SIGNALS: dict[str, SignalFn] = {
+_SIGNALS: dict[str, Callable[[list[float]], float]] = {
     "momentum_12_1": _momentum_12_1,
 }
 
