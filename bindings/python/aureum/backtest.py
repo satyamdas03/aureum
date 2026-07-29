@@ -62,8 +62,8 @@ class MarketData:
                 {"date": date, "close": close, "volume": volume, "sector": sector}
             )
 
-        for symbol in by_symbol:
-            by_symbol[symbol].sort(key=lambda r: r["date"])
+        for records in by_symbol.values():
+            records.sort(key=lambda r: r["date"])
 
         self._by_symbol: dict[str, list[dict[str, Any]]] = dict(by_symbol)
         self._symbols = sorted(self._by_symbol.keys())
