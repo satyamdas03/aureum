@@ -27,7 +27,6 @@ from aureum.certificate import (
 from aureum.quantity import (
     DOLLARS,
     PRICE_PER_SHARE,
-    RETURN,
     SHARE_COUNT,
     USD,
     Quantity,

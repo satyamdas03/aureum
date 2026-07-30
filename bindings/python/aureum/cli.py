@@ -8,6 +8,7 @@ from pathlib import Path
 
 import click
 
+from .adapter import AlpacaAdapter
 from .backtest import BacktestRunner, MarketData
 from .certificate import get_environment
 from .strategy import Strategy
@@ -110,6 +111,39 @@ def backtest(
                 raise click.Abort()
         elif not certificate:
             click.echo(report_json)
+
+
+@cli.command()
+@click.option(
+    "--symbols",
+    required=True,
+    help="Comma-separated list of symbols, e.g. AAPL,MSFT",
+)
+@click.option("--start", required=True, help="Start date ISO-8601, e.g. 2024-01-01")
+@click.option("--end", required=True, help="End date ISO-8601, e.g. 2024-12-31")
+@click.option(
+    "--output",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Output CSV snapshot path",
+)
+@click.option("--feed", default="iex", help="Alpaca data feed (iex, sip)")
+@click.option("--timeframe", default="1Day", help="Bar timeframe")
+def snapshot(symbols: str, start: str, end: str, output: Path, feed: str, timeframe: str) -> None:
+    """Fetch a versionable Alpaca price snapshot and save it as CSV."""
+    import datetime as dt
+
+    symbol_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    start_date = dt.date.fromisoformat(start)
+    end_date = dt.date.fromisoformat(end)
+
+    adapter = AlpacaAdapter(feed=feed)
+    snap = adapter.write_snapshot(
+        output, symbol_list, start_date, end_date, timeframe=timeframe
+    )
+    click.echo(f"Snapshot written to {snap.path.resolve()}")
+    click.echo(f"Rows: {snap.rows}, SHA-256: {snap.sha256}")
+    click.echo(f"Metadata: {snap.path.with_suffix('.snapshot.json')}")
 
 
 def _write_bundle(
