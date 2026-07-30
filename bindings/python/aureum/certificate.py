@@ -14,6 +14,7 @@ reported metrics match within a deterministic tolerance.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import hashlib
 import json
@@ -218,6 +219,12 @@ class BacktestCertificate:
 
     def to_json(self, indent: int = 2) -> str:
         return json.dumps(self.to_dict(), indent=indent, default=str, sort_keys=False)
+
+    def with_draft_lineage(self, draft_lineage: dict[str, Any]) -> "BacktestCertificate":
+        """Return a new certificate with draft lineage injected into execution_trace."""
+        new_trace = dict(self.execution_trace)
+        new_trace["draft_lineage"] = draft_lineage
+        return dataclasses.replace(self, execution_trace=new_trace)
 
 
 def hash_file(path: str | Path) -> str:
