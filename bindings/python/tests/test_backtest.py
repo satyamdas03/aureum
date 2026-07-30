@@ -90,3 +90,27 @@ def test_backtest_cli_writes_output_file(tmp_path: Path) -> None:
     assert out.exists()
     report = json.loads(out.read_text(encoding="utf-8"))
     assert report["strategy"] == "tech-momentum-sector-neutral"
+
+
+def test_backtest_cli_writes_prover_artifacts(tmp_path: Path) -> None:
+    smt = tmp_path / "risk.smt2"
+    lean = tmp_path / "risk.lean"
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "backtest",
+            str(EXAMPLE_STRATEGY),
+            "--data",
+            str(EXAMPLE_DATA),
+            "--smt",
+            str(smt),
+            "--lean",
+            str(lean),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert smt.exists()
+    assert "(set-logic QF_LRA)" in smt.read_text(encoding="utf-8")
+    assert lean.exists()
+    assert "import Mathlib" in lean.read_text(encoding="utf-8")

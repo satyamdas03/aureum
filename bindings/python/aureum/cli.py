@@ -11,6 +11,7 @@ import click
 from .adapter import AlpacaAdapter
 from .backtest import BacktestRunner, MarketData
 from .certificate import get_environment
+from .prover import Lean4Generator, SmtLibGenerator, extract_claims
 from .strategy import Strategy
 
 
@@ -46,12 +47,24 @@ def validate(path: Path) -> None:
     type=click.Path(path_type=Path),
     help="Output reproducibility bundle tarball path",
 )
+@click.option(
+    "--smt",
+    type=click.Path(path_type=Path),
+    help="Output SMT-LIB verifier script path",
+)
+@click.option(
+    "--lean",
+    type=click.Path(path_type=Path),
+    help="Output Lean 4 verifier theorem file path",
+)
 def backtest(
     path: Path,
     data: Path | None,
     output: Path | None,
     certificate: Path | None,
     bundle: Path | None,
+    smt: Path | None,
+    lean: Path | None,
 ) -> None:
     """Run a deterministic backtest for a strategy."""
     strategy = Strategy.from_file(path)
@@ -75,12 +88,13 @@ def backtest(
         strategy, market_data, data_source=data_source, initial_nav=1_000_000.0
     )
 
-    if certificate or bundle:
+    if certificate or bundle or smt or lean:
         env = get_environment(aureum_version="0.2.0", cwd=path.parent)
         cert = runner.build_certificate(
             strategy_path=path, data_path=data, environment=env
         )
         cert_json = cert.to_json(indent=2)
+        cert_dict = cert.to_dict()
 
         if certificate:
             certificate = Path(certificate)
@@ -90,6 +104,18 @@ def backtest(
             except OSError as e:
                 click.echo(f"Failed to write certificate: {e}")
                 raise click.Abort()
+
+        if smt:
+            smt = Path(smt)
+            claims = extract_claims(cert_dict)
+            smt.write_text(SmtLibGenerator().generate(claims), encoding="utf-8")
+            click.echo(f"SMT-LIB written to {smt.resolve()}")
+
+        if lean:
+            lean = Path(lean)
+            claims = extract_claims(cert_dict)
+            lean.write_text(Lean4Generator().generate(claims), encoding="utf-8")
+            click.echo(f"Lean 4 file written to {lean.resolve()}")
 
         if bundle:
             _write_bundle(bundle, path, data, cert_json)
