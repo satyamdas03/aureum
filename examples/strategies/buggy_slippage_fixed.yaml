@@ -1,0 +1,64 @@
+# Example of a misconfigured strategy that the Aureum certificate catches.
+#
+# The slippage value is entered as a percentage (0.05 = 5%) instead of a
+# fraction (0.0005 = 5 bps).  This is a common data-entry bug in quant
+# workflows.  The resulting certificate shows elevated turnover and a failing
+# max_turnover_annual constraint, making the bug visible to a model validator.
+
+apiVersion: aureum.io/v1alpha1
+kind: Strategy
+metadata:
+  name: buggy-slippage-percentage-not-fraction
+  description: |
+    Identical to tech-momentum-sector-neutral, but slippage is misconfigured
+    as 5% instead of 5 bps. The certificate should flag excessive turnover.
+  tags: [momentum, equity, sector-neutral, bug-demo]
+
+spec:
+  universe:
+    source: sp500
+    filter:
+      sector: Technology
+      min_price: 5.00
+      min_adv20: 1000000
+
+  schedule:
+    rebalance: 1M
+    lookback: 252d
+
+  signals:
+    - name: momentum_12_1
+      description: 12-month return excluding last month (Jegadeesh-Titman)
+      expr: returns(close, 252).sum() - returns(close, 21).sum()
+      type: return
+
+  ranking:
+    by: momentum_12_1
+    ascending: false
+
+  weights:
+    kind: equal
+    top_n: 0.20
+
+  risk:
+    max_drawdown:
+      value: 0.30
+      hard: true
+    max_leverage:
+      value: 1.50
+      hard: true
+    max_turnover_annual:
+      value: 20.00
+      hard: false
+    max_concentration_single_name:
+      value: 0.30
+      hard: true
+
+  execution:
+    open: market_on_open
+    slippage: 0.0005
+
+  audit:
+    lineage: full
+    deterministic: true
+    deterministic_seed: 42

@@ -33,14 +33,14 @@ The output is a JSON file with this structure:
 
 ```json
 {
-  "aureum_version": "0.2.0",
+  "aureum_version": "0.3.0",
   "certificate_spec_version": "1.0",
   "generated_at": "2026-07-30T12:00:00Z",
   "environment": {
     "git_commit": "abc1234",
     "git_dirty": false,
     "python_version": "3.11.9",
-    "aureum_version": "0.2.0"
+    "aureum_version": "0.3.0"
   },
   "inputs": {
     "strategy": {

@@ -8,6 +8,7 @@ from aureum.backtest import BacktestRunner, MarketData
 from aureum.certificate import Environment, hash_file
 from aureum.strategy import Strategy
 from aureum.verifier import all_passed
+from aureum import __version__
 
 EXAMPLE_DATA = Path(__file__).parents[3] / "examples" / "data" / "synthetic_prices.csv"
 CORRECT_STRATEGY = (
@@ -23,7 +24,7 @@ def _run_certificate(strategy_path: Path):
     data = MarketData.from_csv(EXAMPLE_DATA)
     runner = BacktestRunner(strategy, data, data_source=str(EXAMPLE_DATA))
     env = Environment(
-        aureum_version="0.2.0",
+        aureum_version=__version__,
         git_commit="demo",
         git_dirty=False,
         python_version="3.11.9",

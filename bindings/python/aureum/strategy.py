@@ -45,6 +45,16 @@ class Strategy:
             errors.append("spec.schedule is required")
         if "ranking" not in spec:
             errors.append("spec.ranking is required")
+        else:
+            ranking = spec["ranking"]
+            signal_name = ranking.get("by")
+            if not signal_name:
+                errors.append("spec.ranking.by is required")
+            elif signal_name not in {"momentum_12_1"}:
+                errors.append(
+                    f"spec.ranking.by '{signal_name}' is not supported; "
+                    "only 'momentum_12_1' is available"
+                )
         if "weights" not in spec:
             errors.append("spec.weights is required")
         if "execution" not in spec:

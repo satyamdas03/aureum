@@ -1,0 +1,36 @@
+apiVersion: aureum.io/v1alpha1
+kind: Strategy
+metadata:
+  name: tech-momentum-top20
+  description: Long-only technology momentum strategy, top 20% by 12-1 month momentum with equal weighting.
+spec:
+  universe:
+    source: sp500
+    filter:
+      sector: Technology
+      min_price: 5.00
+      min_adv20: 1000000
+  schedule:
+    rebalance: 1M
+    lookback: 252d
+  ranking:
+    by: momentum_12_1
+    ascending: false
+  weights:
+    kind: equal
+    top_n: 0.20
+  execution:
+    slippage: 0.0005
+  risk:
+    max_drawdown:
+      value: 0.30
+      hard: true
+    max_leverage:
+      value: 1.50
+      hard: true
+    max_turnover_annual:
+      value: 20.00
+      hard: false
+    max_concentration_single_name:
+      value: 0.30
+      hard: true

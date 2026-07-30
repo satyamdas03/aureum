@@ -15,6 +15,7 @@ from .ai import (
 from .backtest import BacktestRunner, MarketData
 from .certificate import get_environment
 from .strategy import Strategy
+from aureum import __version__
 
 
 @dataclass
@@ -120,7 +121,7 @@ class StrategyAuthor:
             runner = BacktestRunner(
                 strategy, data, data_source=str(dry_run_data)
             )
-            env = get_environment(aureum_version="0.2.0", cwd=output_path.parent)
+            env = get_environment(aureum_version=__version__, cwd=output_path.parent)
             cert = runner.build_certificate(
                 strategy_path=output_path,
                 data_path=dry_run_data,

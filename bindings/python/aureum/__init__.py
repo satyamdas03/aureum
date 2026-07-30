@@ -21,6 +21,8 @@ from .quantity import Dimension, Quantity, Unit
 from .strategy import Strategy
 from .verifier import verify_constraints
 
+__version__ = "0.3.0"
+
 __all__ = [
     "BacktestCertificate",
     "BacktestRunner",
@@ -36,6 +38,7 @@ __all__ = [
     "Results",
     "Strategy",
     "Unit",
+    "__version__",
     "get_environment",
     "hash_file",
     "verify_constraints",

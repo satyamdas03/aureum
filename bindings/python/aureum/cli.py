@@ -15,10 +15,11 @@ from .certificate import get_environment
 from .prover import Lean4Generator, SmtLibGenerator, extract_claims
 from .reflector import StrategyReflector
 from .strategy import Strategy
+from aureum import __version__
 
 
 @click.group()
-@click.version_option(version="0.2.0")
+@click.version_option(version=__version__)
 def cli():
     """Aureum — self-proving semantic kernel for finance."""
 
@@ -128,6 +129,12 @@ def reflect(
             f"Reflection succeeded after {result.attempts} attempt(s). "
             f"Accepted strategy: {result.accepted_draft}"
         )
+        if result.final_certificate and result.accepted_draft:
+            cert_path = Path(result.accepted_draft).with_suffix(".certificate.json")
+            cert_path.write_text(
+                result.final_certificate.to_json(indent=2), encoding="utf-8"
+            )
+            click.echo(f"Reflection certificate: {cert_path.resolve()}")
     else:
         click.echo(
             f"Reflection failed after {result.attempts} attempt(s). "
@@ -190,7 +197,7 @@ def backtest(
     )
 
     if certificate or bundle or smt or lean:
-        env = get_environment(aureum_version="0.2.0", cwd=path.parent)
+        env = get_environment(aureum_version=__version__, cwd=path.parent)
         cert = runner.build_certificate(
             strategy_path=path, data_path=data, environment=env
         )

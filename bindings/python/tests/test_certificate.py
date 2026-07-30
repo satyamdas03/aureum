@@ -16,6 +16,7 @@ from aureum.certificate import (
 )
 from aureum.cli import cli
 from aureum.strategy import Strategy
+from aureum import __version__
 
 EXAMPLE_STRATEGY = (
     Path(__file__).parents[3] / "examples" / "strategies" / "momentum.yaml"
@@ -36,7 +37,7 @@ def test_certificate_from_run_has_required_claims():
     runner = BacktestRunner(strategy, data, data_source=str(EXAMPLE_DATA))
 
     env = Environment(
-        aureum_version="0.2.0",
+        aureum_version=__version__,
         git_commit="abc1234",
         git_dirty=False,
         python_version="3.11.9",
@@ -66,13 +67,13 @@ def test_certificate_to_dict_serializes():
     strategy = Strategy.from_file(EXAMPLE_STRATEGY)
     data = MarketData.from_csv(EXAMPLE_DATA)
     runner = BacktestRunner(strategy, data, data_source=str(EXAMPLE_DATA))
-    env = get_environment(aureum_version="0.2.0")
+    env = get_environment(aureum_version=__version__)
     cert = runner.build_certificate(
         strategy_path=EXAMPLE_STRATEGY, data_path=EXAMPLE_DATA, environment=env
     )
 
     d = cert.to_dict()
-    assert d["aureum_version"] == "0.2.0"
+    assert d["aureum_version"] == __version__
     assert d["certificate_spec_version"] == "1.0"
     assert "environment" in d
     assert "inputs" in d
@@ -88,7 +89,7 @@ def test_certificate_is_deterministic():
     data = MarketData.from_csv(EXAMPLE_DATA)
     runner = BacktestRunner(strategy, data, data_source=str(EXAMPLE_DATA))
     env = Environment(
-        aureum_version="0.2.0",
+        aureum_version=__version__,
         git_commit="abc1234",
         git_dirty=False,
         python_version="3.11.9",
@@ -121,7 +122,7 @@ def test_cli_writes_certificate(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     assert cert_path.exists()
     cert = json.loads(cert_path.read_text(encoding="utf-8"))
-    assert cert["aureum_version"] == "0.2.0"
+    assert cert["aureum_version"] == __version__
     assert cert["inputs"]["strategy"]["sha256"] == hash_file(EXAMPLE_STRATEGY)
     assert cert["inputs"]["data"]["sha256"] == hash_file(EXAMPLE_DATA)
 
@@ -156,7 +157,7 @@ def test_certificate_from_dict_reconstructs_nested_dataclasses(tmp_path: Path):
     data = MarketData.from_csv(EXAMPLE_DATA)
     runner = BacktestRunner(strategy, data, data_source=str(EXAMPLE_DATA))
     env = Environment(
-        aureum_version="0.2.0",
+        aureum_version=__version__,
         git_commit="abc1234",
         git_dirty=False,
         python_version="3.11.9",

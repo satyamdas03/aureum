@@ -27,7 +27,6 @@ class AnthropicClient:
 
     def complete(self, prompt: str, *, max_tokens: int = 4096) -> str:
         import anthropic
-        from anthropic.types import TextBlock
 
         client = anthropic.Anthropic(api_key=self.api_key)
         response = client.messages.create(
@@ -35,10 +34,16 @@ class AnthropicClient:
             max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}],
         )
-        block = response.content[0]
-        if not isinstance(block, TextBlock):
-            raise StrategyAIError("Unexpected response block type from Anthropic API")
-        return block.text
+        text_parts: list[str] = []
+        for block in response.content:
+            if getattr(block, "type", None) == "text" and hasattr(block, "text"):
+                text_parts.append(block.text)
+        if not text_parts:
+            raise StrategyAIError(
+                "No text block found in Anthropic response: "
+                f"{[getattr(b, 'type', type(b).__name__) for b in response.content]}"
+            )
+        return "\n".join(text_parts)
 
 
 def _extract_yaml(text: str) -> str:
@@ -68,8 +73,47 @@ def _extract_yaml(text: str) -> str:
     raise StrategyAIError("No YAML block found in LLM response")
 
 
+_DEFAULT_EXAMPLE_STRATEGY = """apiVersion: aureum.io/v1alpha1
+kind: Strategy
+metadata:
+  name: tech-momentum-sector-neutral
+  description: Long the top 20% of S&P 500 tech stocks by 12-1 month momentum.
+spec:
+  universe:
+    source: sp500
+    filter:
+      sector: Technology
+      min_price: 5.00
+      min_adv20: 1000000
+  schedule:
+    rebalance: 1M
+    lookback: 252d
+  ranking:
+    by: momentum_12_1
+    ascending: false
+  weights:
+    kind: equal
+    top_n: 0.20
+  execution:
+    slippage: 0.0005
+  risk:
+    max_drawdown:
+      value: 0.30
+      hard: true
+    max_leverage:
+      value: 1.50
+      hard: true
+    max_turnover_annual:
+      value: 20.00
+      hard: false
+    max_concentration_single_name:
+      value: 0.30
+      hard: true
+"""
+
+
 def build_author_prompt(user_prompt: str, example_strategy: str | None = None) -> str:
-    base = """You are an expert quantitative strategist using the Aureum strategy DSL.
+    base = f"""You are an expert quantitative strategist using the Aureum strategy DSL.
 
 Write a valid Aureum Strategy YAML that satisfies the user's request.
 
@@ -80,8 +124,7 @@ Aureum Strategy schema:
 - metadata.description: optional
 - spec.universe (required): source, filter (sector, min_price, min_adv20)
 - spec.schedule (required): rebalance (only "1M" supported), lookback (e.g. "252d")
-- spec.signals: list of named signals (only momentum_12_1 is supported in the runner)
-- spec.ranking (required): by, ascending, optional signal reference
+- spec.ranking (required): by, ascending. The ONLY valid value for "by" is "momentum_12_1".
 - spec.weights (required): kind (only "equal"), top_n (fraction 0.0-1.0)
 - spec.execution (required): slippage (e.g. 0.0005 for 5 bps)
 - spec.risk: max_drawdown, max_leverage, max_turnover_annual, max_concentration_single_name
@@ -90,12 +133,17 @@ Aureum Strategy schema:
 Output rules:
 - Return ONLY a fenced YAML block using ```yaml.
 - After the YAML block, provide a single-line rationale starting with "Rationale:".
-- Do not invent unsupported fields or signals.
+- Do not invent unsupported fields or custom signal names; ranking.by must be exactly "momentum_12_1".
 - Slippage must be a small decimal (e.g. 0.0005), never 0.05.
+
+Example strategy:
+```yaml
+{_DEFAULT_EXAMPLE_STRATEGY}
+```
 """
     if example_strategy:
-        base += f"\n\nExample strategy:\n```yaml\n{example_strategy}\n```"
-    base += f"\n\nUser request:\n{user_prompt}\n\nGenerate the YAML:"
+        base += f"\n\nAlternate example strategy:\n```yaml\n{example_strategy}\n```"
+    base += f"\nUser request:\n{user_prompt}\n\nGenerate the YAML:"
     return base
 
 

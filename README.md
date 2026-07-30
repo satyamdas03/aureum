@@ -184,7 +184,7 @@ spec:
 
 ## 📜 Self-Proving Backtest Certificate
 
-Aureum `0.2.0` ships the first commercial wedge: every backtest produces a
+Aureum `0.3.0` ships the first commercial wedge: every backtest produces a
 structured, content-addressed **Aureum Backtest Certificate (ABC)**.
 
 The certificate captures:
