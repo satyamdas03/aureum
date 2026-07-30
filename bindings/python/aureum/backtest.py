@@ -51,9 +51,77 @@ def _momentum_12_1(closes: list[float]) -> float:
     return (current / year_ago - 1.0) - (current / month_ago - 1.0)
 
 
+def _volatility_20d(closes: list[float]) -> float:
+    """Annualized realized volatility over the trailing 20 trading days.
+
+    Higher values rank more volatile stocks first (use ascending=false for
+    low-volatility screens). Needs at least 20 closes.
+    """
+    window = 20
+    if len(closes) < window:
+        return float("nan")
+    recent = closes[-window:]
+    returns = [
+        recent[i] / recent[i - 1] - 1.0 for i in range(1, len(recent))
+    ]
+    if len(returns) < 2:
+        return float("nan")
+    mean = sum(returns) / len(returns)
+    variance = sum((r - mean) ** 2 for r in returns) / (len(returns) - 1)
+    std = math.sqrt(variance)
+    return std * math.sqrt(252)
+
+
+def _sharpe_63d(closes: list[float]) -> float:
+    """63-trading-day Sharpe-like ratio: annualized return / annualized vol.
+
+    A rough risk-adjusted return signal. Needs at least 64 closes.
+    """
+    window = 63
+    if len(closes) < window + 1:
+        return float("nan")
+    recent = closes[-(window + 1) :]
+    total_return = recent[-1] / recent[0] - 1.0
+    returns = [
+        recent[i] / recent[i - 1] - 1.0 for i in range(1, len(recent))
+    ]
+    if len(returns) < 2:
+        return float("nan")
+    mean = sum(returns) / len(returns)
+    variance = sum((r - mean) ** 2 for r in returns) / (len(returns) - 1)
+    std = math.sqrt(variance)
+    if std == 0:
+        return float("nan")
+    annual_return = total_return * (252 / window)
+    annual_vol = std * math.sqrt(252)
+    return annual_return / annual_vol
+
+
+def _mean_reversion_5_20(closes: list[float]) -> float:
+    """Z-score of the latest close against its trailing 20-day mean.
+
+    Positive = price is above the mean (potential short / mean-reversion sell).
+    Negative = price is below the mean (potential buy). Use ascending=true to
+    buy the most beaten-down names. Needs at least 20 closes.
+    """
+    window = 20
+    if len(closes) < window:
+        return float("nan")
+    recent = closes[-window:]
+    mean = sum(recent) / len(recent)
+    variance = sum((p - mean) ** 2 for p in recent) / len(recent)
+    std = math.sqrt(variance)
+    if std == 0:
+        return float("nan")
+    return (recent[-1] - mean) / std
+
+
 # Registry of named signals referenced by ``spec.ranking.by``.
 _SIGNALS: dict[str, Callable[[list[float]], float]] = {
     "momentum_12_1": _momentum_12_1,
+    "volatility_20d": _volatility_20d,
+    "sharpe_63d": _sharpe_63d,
+    "mean_reversion_5_20": _mean_reversion_5_20,
 }
 
 

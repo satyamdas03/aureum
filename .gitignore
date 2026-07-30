@@ -49,6 +49,8 @@ data/
 # Generated certificates and drafts
 *.certificate.json
 *.[0-9][0-9][0-9].yaml
+.backtest-*.yaml
+.reflect-*.yaml
 
 # Allow committed example data and its generator.
 !examples/data/

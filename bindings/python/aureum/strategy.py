@@ -50,10 +50,16 @@ class Strategy:
             signal_name = ranking.get("by")
             if not signal_name:
                 errors.append("spec.ranking.by is required")
-            elif signal_name not in {"momentum_12_1"}:
+            elif signal_name not in {
+                "momentum_12_1",
+                "volatility_20d",
+                "sharpe_63d",
+                "mean_reversion_5_20",
+            }:
                 errors.append(
                     f"spec.ranking.by '{signal_name}' is not supported; "
-                    "only 'momentum_12_1' is available"
+                    "supported values: momentum_12_1, volatility_20d, "
+                    "sharpe_63d, mean_reversion_5_20"
                 )
         if "weights" not in spec:
             errors.append("spec.weights is required")

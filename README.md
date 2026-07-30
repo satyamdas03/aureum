@@ -202,6 +202,31 @@ slippage misconfiguration.
 
 Read the full tutorial in the [docs](./docs/self-proving-backtest.md).
 
+## 🖥️ Aureum Studio (Web Dashboard)
+
+Aureum ships with a browser-based studio for interactive strategy authoring and
+backtesting:
+
+```bash
+# 1. Start the API server
+cd bindings/python
+pip install -e ".[web]"
+export ANTHROPIC_API_KEY=...
+uvicorn aureum.server:app --reload --port 8000
+
+# 2. In another terminal, start the UI
+cd frontend/web
+npm install
+npm run dev
+```
+
+Open http://localhost:5173 to:
+- Author strategies from natural-language prompts with Claude.
+- Edit YAML in Monaco with instant validation.
+- Run backtests and inspect NAV curves.
+- View self-proving backtest certificates with SHA-256 lineage.
+- Fix failing strategies with the reflection loop.
+
 ## 🎯 The Five Wedge Products
 
 Aureum is designed to grow into five high-value financial surfaces from a single kernel:

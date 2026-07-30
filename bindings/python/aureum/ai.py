@@ -124,7 +124,11 @@ Aureum Strategy schema:
 - metadata.description: optional
 - spec.universe (required): source, filter (sector, min_price, min_adv20)
 - spec.schedule (required): rebalance (only "1M" supported), lookback (e.g. "252d")
-- spec.ranking (required): by, ascending. The ONLY valid value for "by" is "momentum_12_1".
+- spec.ranking (required): by, ascending. Valid values for "by":
+  - "momentum_12_1": 12-month return excluding last month (long-only momentum)
+  - "volatility_20d": annualized realized volatility over trailing 20 days
+  - "sharpe_63d": 63-day Sharpe-like ratio (return / vol)
+  - "mean_reversion_5_20": z-score of latest close vs 20-day mean
 - spec.weights (required): kind (only "equal"), top_n (fraction 0.0-1.0)
 - spec.execution (required): slippage (e.g. 0.0005 for 5 bps)
 - spec.risk: max_drawdown, max_leverage, max_turnover_annual, max_concentration_single_name
@@ -133,7 +137,7 @@ Aureum Strategy schema:
 Output rules:
 - Return ONLY a fenced YAML block using ```yaml.
 - After the YAML block, provide a single-line rationale starting with "Rationale:".
-- Do not invent unsupported fields or custom signal names; ranking.by must be exactly "momentum_12_1".
+- Do not invent unsupported fields or custom signal names; ranking.by must be one of the four supported signals above.
 - Slippage must be a small decimal (e.g. 0.0005), never 0.05.
 
 Example strategy:
