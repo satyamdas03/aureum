@@ -41,6 +41,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
+  - Self-Proving Backtest: self-proving-backtest.md
   - DSL Reference: dsl.md
   - Architecture: architecture.md
   - Roadmap: roadmap.md

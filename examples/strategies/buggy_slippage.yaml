@@ -1,14 +1,18 @@
-# Example Aureum Quant Kernel strategy DSL
-# A simple momentum strategy on US tech stocks, sector-neutralized.
+# Example of a misconfigured strategy that the Aureum certificate catches.
+#
+# The slippage value is entered as a percentage (0.05 = 5%) instead of a
+# fraction (0.0005 = 5 bps).  This is a common data-entry bug in quant
+# workflows.  The resulting certificate shows elevated turnover and a failing
+# max_turnover_annual constraint, making the bug visible to a model validator.
 
 apiVersion: aureum.io/v1alpha1
 kind: Strategy
 metadata:
-  name: tech-momentum-sector-neutral
+  name: buggy-slippage-percentage-not-fraction
   description: |
-    Long the top 20% of S&P 500 tech stocks by 12-1 month momentum,
-    neutralized by sector, with a 10% max-drawdown guardrail.
-  tags: [momentum, equity, sector-neutral]
+    Identical to tech-momentum-sector-neutral, but slippage is misconfigured
+    as 5% instead of 5 bps. The certificate should flag excessive turnover.
+  tags: [momentum, equity, sector-neutral, bug-demo]
 
 spec:
   universe:
@@ -52,7 +56,7 @@ spec:
 
   execution:
     open: market_on_open
-    slippage: 0.0005
+    slippage: 0.05
 
   audit:
     lineage: full

@@ -6,9 +6,12 @@ It lets you write, run, and audit financial models, contracts, reports, and trad
 
 ## What makes Aureum different
 
+- **Self-proving backtests:** Every run emits a structured, content-addressed
+  **Aureum Backtest Certificate (ABC)** that a model validator can re-run and
+  inspect.
 - **Semantic substrate:** Every object has a canonical identity and meaning (FIBO, CDM, ACTUS).
 - **Dimensional types:** `float<USD>` and `float<shares>` cannot be added by mistake.
-- **Deterministic execution:** The same inputs produce the same outputs, bit-for-bit.
+- **Deterministic execution:** The same inputs produce the same outputs within a deterministic tolerance.
 - **Proof as a service:** Risk constraints are checked by Lean 4 / SMT, not just unit tests.
 - **Polyglot:** Use Python, Excel, SQL, or Solidity. Aureum provides the meaning-layer underneath.
 

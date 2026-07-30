@@ -17,7 +17,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from aureum.certificate import (
+    BacktestCertificate,
+    Environment,
+    InputLineage,
+    Inputs,
+    hash_file,
+)
 from aureum.strategy import Strategy
+from aureum.verifier import verify_constraints
 
 
 def _momentum_12_1(closes: list[float]) -> float:
@@ -128,7 +136,10 @@ class BacktestResult:
     max_drawdown: float
     trades: int
     turnover_annual: float
+    max_leverage: float
+    max_concentration: float
     daily_nav: list[dict[str, Any]] = field(default_factory=list)
+    daily_positions: list[dict[str, Any]] = field(default_factory=list)
     rebalance_log: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -142,11 +153,16 @@ class BacktestResult:
             "total_return": round(self.total_return, 6),
             "cagr": round(self.cagr, 6),
             "volatility_annual": round(self.volatility_annual, 6),
-            "sharpe_ratio": round(self.sharpe_ratio, 4) if self.sharpe_ratio is not None else None,
+            "sharpe_ratio": round(self.sharpe_ratio, 4)
+            if self.sharpe_ratio is not None
+            else None,
             "max_drawdown": round(self.max_drawdown, 6),
             "trades": self.trades,
             "turnover_annual": round(self.turnover_annual, 6),
+            "max_leverage": round(self.max_leverage, 6),
+            "max_concentration": round(self.max_concentration, 6),
             "daily_nav": self.daily_nav,
+            "daily_positions": self.daily_positions,
             "rebalance_log": self.rebalance_log,
         }
 
@@ -186,15 +202,48 @@ class BacktestRunner:
         positions: dict[str, float] = {}
         cash = self.initial_nav
         daily_nav: list[dict[str, Any]] = []
+        daily_positions: list[dict[str, Any]] = []
         rebalance_log: list[dict[str, Any]] = []
         trades = 0
         cumulative_turnover = 0.0
+        max_leverage = 0.0
+        max_concentration = 0.0
 
         rebalance_dates = self._rebalance_dates()
 
         for date in self.data.dates:
             nav = self._portfolio_value(date, positions, cash)
             daily_nav.append({"date": date.isoformat(), "nav": round(nav, 4)})
+
+            gross_value = sum(
+                abs(shares * price)
+                for symbol, shares in positions.items()
+                if (price := self.data.price(date, symbol)) is not None
+            )
+            leverage = gross_value / nav if nav > 0 else 0.0
+            concentration = (
+                max(
+                    (
+                        abs(shares * price) / nav
+                        for symbol, shares in positions.items()
+                        if (price := self.data.price(date, symbol)) is not None
+                    ),
+                    default=0.0,
+                )
+                if nav > 0
+                else 0.0
+            )
+            max_leverage = max(max_leverage, leverage)
+            max_concentration = max(max_concentration, concentration)
+            daily_positions.append(
+                {
+                    "date": date.isoformat(),
+                    "cash": round(cash, 4),
+                    "positions": {s: round(v, 6) for s, v in sorted(positions.items())},
+                    "leverage": round(leverage, 6),
+                    "concentration": round(concentration, 6),
+                }
+            )
 
             if date in rebalance_dates:
                 candidates = self._eligible_universe(date, universe)
@@ -245,9 +294,7 @@ class BacktestRunner:
                         trades += 1
                     turnover_notional += abs(cash_spent)
 
-                positions = {
-                    s: v for s, v in new_positions.items() if abs(v) > 1e-9
-                }
+                positions = {s: v for s, v in new_positions.items() if abs(v) > 1e-9}
                 cash = new_cash
                 cumulative_turnover += turnover_notional / nav if nav > 0 else 0.0
 
@@ -280,7 +327,10 @@ class BacktestRunner:
             max_drawdown=max_dd,
             trades=trades,
             turnover_annual=cumulative_turnover,
+            max_leverage=max_leverage,
+            max_concentration=max_concentration,
             daily_nav=daily_nav,
+            daily_positions=daily_positions,
             rebalance_log=rebalance_log,
         )
 
@@ -367,9 +417,7 @@ class BacktestRunner:
             return 0.0
         return (1.0 + total_return) ** (1.0 / years) - 1.0
 
-    def _sharpe(
-        self, daily_nav: list[dict[str, Any]]
-    ) -> tuple[float, float | None]:
+    def _sharpe(self, daily_nav: list[dict[str, Any]]) -> tuple[float, float | None]:
         returns = []
         for prev, cur in itertools.pairwise(daily_nav):
             if prev["nav"] > 0:
@@ -395,3 +443,79 @@ class BacktestRunner:
                 dd = (peak - nav) / peak
                 max_dd = max(max_dd, dd)
         return max_dd
+
+    def build_certificate(
+        self,
+        strategy_path: str | Path,
+        data_path: str | Path,
+        environment: Environment,
+    ) -> BacktestCertificate:
+        """Run the backtest and wrap the result in an Aureum Backtest Certificate."""
+        from aureum.certificate import (
+            ExecutionSummary,
+            Results,
+        )
+
+        result = self.run()
+        constraints = self.strategy.constraints()
+        risk_results = verify_constraints(
+            constraints,
+            max_drawdown=result.max_drawdown,
+            max_leverage=result.max_leverage,
+            turnover_annual=result.turnover_annual,
+            concentration_single_name=result.max_concentration,
+        )
+
+        strategy_path = Path(strategy_path)
+        data_path = Path(data_path)
+
+        inputs = Inputs(
+            strategy=InputLineage(
+                path=str(strategy_path),
+                sha256=hash_file(strategy_path),
+                metadata={"name": result.strategy_name},
+            ),
+            data=InputLineage(
+                path=str(data_path),
+                sha256=hash_file(data_path),
+                metadata={
+                    "symbols": len(self.data.symbols),
+                    "dates": len(self.data.dates),
+                    "start_date": result.start_date,
+                    "end_date": result.end_date,
+                },
+            ),
+        )
+
+        execution = ExecutionSummary(
+            start_date=result.start_date,
+            end_date=result.end_date,
+            initial_nav=result.initial_nav,
+            rebalance_count=len(result.rebalance_log),
+            trades=result.trades,
+        )
+
+        results = Results(
+            final_nav=result.final_nav,
+            total_return=result.total_return,
+            cagr=result.cagr,
+            volatility_annual=result.volatility_annual,
+            sharpe_ratio=result.sharpe_ratio,
+            max_drawdown=result.max_drawdown,
+            turnover_annual=result.turnover_annual,
+        )
+
+        execution_trace = {
+            "daily_nav": result.daily_nav,
+            "daily_positions": result.daily_positions,
+            "rebalance_log": result.rebalance_log,
+        }
+
+        return BacktestCertificate.from_run(
+            environment=environment,
+            inputs=inputs,
+            execution=execution,
+            results=results,
+            risk_constraints=risk_results,
+            execution_trace=execution_trace,
+        )

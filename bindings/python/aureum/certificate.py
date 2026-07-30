@@ -1,0 +1,281 @@
+"""Aureum Backtest Certificate (ABC) — structured audit artifact for a backtest run.
+
+A certificate is a JSON-serializable artifact that captures:
+- the environment in which the backtest ran (tool versions, git commit);
+- the content-addressed inputs (strategy YAML, data CSV);
+- a summary of execution and results;
+- static risk-constraint compliance checks;
+- a tamper-evident input hash and a result hash for reproducibility validation.
+
+In Phase 1 the certificate is evidence, not a cryptographic proof or regulatory
+artifact.  A validator script can re-run the bundled inputs and confirm the
+reported metrics match within a deterministic tolerance.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import hashlib
+import json
+import platform
+import subprocess
+import sys
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+
+def _sha256_file(path: Path) -> str:
+    """Return the SHA-256 hex digest of a file's raw bytes."""
+    hasher = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def _sha256_text(text: str) -> str:
+    """Return the SHA-256 hex digest of a UTF-8 string."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _stable_json(obj: Any) -> str:
+    """Serialize an object to a stable, sorted JSON string for hashing."""
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), default=str)
+
+
+@dataclass
+class Environment:
+    """Runtime environment captured for reproducibility."""
+
+    aureum_version: str
+    git_commit: str
+    git_dirty: bool
+    python_version: str
+    platform: str
+    dependencies_digest: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "aureum_version": self.aureum_version,
+            "git_commit": self.git_commit,
+            "git_dirty": self.git_dirty,
+            "python_version": self.python_version,
+            "platform": self.platform,
+            "dependencies_digest": self.dependencies_digest,
+        }
+
+
+@dataclass
+class InputLineage:
+    """Content-addressed description of one input file."""
+
+    path: str
+    sha256: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "path": self.path,
+            "sha256": self.sha256,
+            "metadata": self.metadata,
+        }
+
+
+@dataclass
+class Inputs:
+    """All inputs that produced a backtest result."""
+
+    strategy: InputLineage
+    data: InputLineage
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "strategy": self.strategy.to_dict(),
+            "data": self.data.to_dict(),
+        }
+
+
+@dataclass
+class ExecutionSummary:
+    """High-level execution metadata."""
+
+    start_date: str
+    end_date: str
+    initial_nav: float
+    rebalance_count: int
+    trades: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "start_date": self.start_date,
+            "end_date": self.end_date,
+            "initial_nav": round(self.initial_nav, 4),
+            "rebalance_count": self.rebalance_count,
+            "trades": self.trades,
+        }
+
+
+@dataclass
+class Results:
+    """Performance and risk metrics from the backtest."""
+
+    final_nav: float
+    total_return: float
+    cagr: float
+    volatility_annual: float
+    sharpe_ratio: float | None
+    max_drawdown: float
+    turnover_annual: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "final_nav": round(self.final_nav, 4),
+            "total_return": round(self.total_return, 6),
+            "cagr": round(self.cagr, 6),
+            "volatility_annual": round(self.volatility_annual, 6),
+            "sharpe_ratio": round(self.sharpe_ratio, 4)
+            if self.sharpe_ratio is not None
+            else None,
+            "max_drawdown": round(self.max_drawdown, 6),
+            "turnover_annual": round(self.turnover_annual, 6),
+        }
+
+
+@dataclass
+class Determinism:
+    """Reproducibility claim and tolerance."""
+
+    input_hash: str
+    result_hash: str
+    tolerance: str = "1e-6 relative + 1e-9 absolute"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "input_hash": self.input_hash,
+            "result_hash": self.result_hash,
+            "tolerance": self.tolerance,
+        }
+
+
+@dataclass
+class BacktestCertificate:
+    """Structured, machine-checkable audit artifact for a single backtest run."""
+
+    aureum_version: str
+    certificate_spec_version: str
+    generated_at: str
+    environment: Environment
+    inputs: Inputs
+    execution: ExecutionSummary
+    results: Results
+    risk_constraints: list[dict[str, Any]]
+    execution_trace: dict[str, Any]
+    determinism: Determinism
+
+    @classmethod
+    def from_run(
+        cls,
+        *,
+        environment: Environment,
+        inputs: Inputs,
+        execution: ExecutionSummary,
+        results: Results,
+        risk_constraints: list[dict[str, Any]],
+        execution_trace: dict[str, Any],
+    ) -> BacktestCertificate:
+        """Build a certificate from the raw parts of a backtest run."""
+        input_hash = _sha256_text(_stable_json(inputs.to_dict()))
+        result_hash = _sha256_text(_stable_json(results.to_dict()))
+        return cls(
+            aureum_version=environment.aureum_version,
+            certificate_spec_version="1.0",
+            generated_at=dt.datetime.now(dt.timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z"),
+            environment=environment,
+            inputs=inputs,
+            execution=execution,
+            results=results,
+            risk_constraints=risk_constraints,
+            execution_trace=execution_trace,
+            determinism=Determinism(input_hash=input_hash, result_hash=result_hash),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "aureum_version": self.aureum_version,
+            "certificate_spec_version": self.certificate_spec_version,
+            "generated_at": self.generated_at,
+            "environment": self.environment.to_dict(),
+            "inputs": self.inputs.to_dict(),
+            "execution": self.execution.to_dict(),
+            "results": self.results.to_dict(),
+            "risk_constraints": self.risk_constraints,
+            "execution_trace": self.execution_trace,
+            "determinism": self.determinism.to_dict(),
+        }
+
+    def to_json(self, indent: int = 2) -> str:
+        return json.dumps(self.to_dict(), indent=indent, default=str, sort_keys=False)
+
+
+def hash_file(path: str | Path) -> str:
+    """Public helper for hashing input files."""
+    return _sha256_file(Path(path))
+
+
+def hash_text(text: str) -> str:
+    """Public helper for hashing text inputs."""
+    return _sha256_text(text)
+
+
+def _git_commit(cwd: Path | None = None) -> tuple[str, bool]:
+    """Return (commit_hash, dirty) for the current git repo, or ('unknown', False)."""
+    try:
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=cwd,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        dirty = bool(status.stdout.strip())
+        return commit, dirty
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return "unknown", False
+
+
+def _dependency_digest() -> str:
+    """Best-effort digest of installed Python packages relevant to Aureum.
+
+    Returns a hash of `pip freeze` output, or an empty string if unavailable.
+    """
+    try:
+        freeze = subprocess.check_output(
+            [sys.executable, "-m", "pip", "freeze"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        return _sha256_text(freeze)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return ""
+
+
+def get_environment(aureum_version: str, cwd: Path | None = None) -> Environment:
+    """Capture the runtime environment for a certificate."""
+    commit, dirty = _git_commit(cwd)
+    return Environment(
+        aureum_version=aureum_version,
+        git_commit=commit,
+        git_dirty=dirty,
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+        platform=platform.platform(),
+        dependencies_digest=_dependency_digest(),
+    )

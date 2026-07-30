@@ -88,13 +88,16 @@ Aureum unifies finance under one **self-proving semantic substrate**:
 
 ```bash
 pip install aureum
-aureum backtest examples/strategies/momentum.yaml --data examples/data/synthetic_prices.csv
-```
 
-**Or describe a strategy in plain English and let Aureum build it:**
+# Run a deterministic backtest with a machine-checkable certificate
+aureum backtest examples/strategies/momentum.yaml \
+  --data examples/data/synthetic_prices.csv \
+  --certificate certificate.json
 
-```bash
-aureum generate "momentum strategy on S&P 500 tech stocks, sector neutral, max drawdown 10%"
+# Or bundle inputs + certificate for model-risk review
+aureum backtest examples/strategies/momentum.yaml \
+  --data examples/data/synthetic_prices.csv \
+  --bundle momentum-run.tar.gz
 ```
 
 ---
@@ -138,10 +141,16 @@ spec:
 
   risk:
     max_drawdown:
-      value: 0.10
+      value: 0.30
       hard: true
     max_leverage:
-      value: 1.00
+      value: 1.50
+      hard: true
+    max_turnover_annual:
+      value: 20.00
+      hard: false
+    max_concentration_single_name:
+      value: 0.30
       hard: true
 
   audit:
@@ -151,6 +160,26 @@ spec:
 ```
 
 ---
+
+## 📜 Self-Proving Backtest Certificate
+
+Aureum `0.2.0` ships the first commercial wedge: every backtest produces a
+structured, content-addressed **Aureum Backtest Certificate (ABC)**.
+
+The certificate captures:
+
+- SHA-256 hashes of the strategy YAML and price CSV.
+- Git commit, Python version, and Aureum version.
+- Execution trace, daily NAV, rebalances, and fills.
+- Static risk-constraint compliance (`max_drawdown`, `max_leverage`, `max_turnover_annual`, `max_concentration_single_name`).
+- A deterministic input hash and result hash for CI reproducibility.
+
+A model validator can re-run the exact same command in a fresh environment and
+confirm the metrics match within a deterministic tolerance.  The repo includes a
+`buggy_slippage.yaml` example that shows the certificate catching a 5% vs 5 bps
+slippage misconfiguration.
+
+Read the full tutorial in the [docs](./docs/self-proving-backtest.md).
 
 ## 🎯 The Five Wedge Products
 
@@ -189,8 +218,8 @@ Aureum does not ask buyers to add a new budget line. It replaces the **semantic-
 | Phase | Goal | Status |
 |---|---|---|
 | **0** | Repo, docs, and buildable skeleton | ✅ Done |
-| **1** | Quant Kernel MVP: DSL + deterministic backtest + lineage | 🔨 In progress |
-| **2** | Dimensional types + formal risk guardrails | Planned |
+| **1** | Self-proving backtest: DSL + deterministic runner + ABC certificate | ✅ Done |
+| **2** | Dimensional type enforcement + real data adapter + Lean verifier bridge | Planned |
 | **3** | AI authoring + reflection loop | Planned |
 | **4** | Multi-user surfaces (indie, fund, fintech, DeFi) | Planned |
 | **5** | Public launch + community | Planned |

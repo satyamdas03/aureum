@@ -11,7 +11,9 @@ from aureum.backtest import BacktestRunner, MarketData
 from aureum.cli import cli
 from aureum.strategy import Strategy
 
-EXAMPLE_STRATEGY = Path(__file__).parents[3] / "examples" / "strategies" / "momentum.yaml"
+EXAMPLE_STRATEGY = (
+    Path(__file__).parents[3] / "examples" / "strategies" / "momentum.yaml"
+)
 EXAMPLE_DATA = Path(__file__).parents[3] / "examples" / "data" / "synthetic_prices.csv"
 
 
