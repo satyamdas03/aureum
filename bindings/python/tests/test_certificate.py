@@ -149,3 +149,26 @@ def test_cli_writes_bundle(tmp_path: Path) -> None:
         assert "strategy.yaml" in names
         assert "data.csv" in names
         assert "certificate.json" in names
+
+
+def test_certificate_from_dict_reconstructs_nested_dataclasses(tmp_path: Path):
+    strategy = Strategy.from_file(EXAMPLE_STRATEGY)
+    data = MarketData.from_csv(EXAMPLE_DATA)
+    runner = BacktestRunner(strategy, data, data_source=str(EXAMPLE_DATA))
+    env = Environment(
+        aureum_version="0.2.0",
+        git_commit="abc1234",
+        git_dirty=False,
+        python_version="3.11.9",
+        platform="test",
+    )
+    cert = runner.build_certificate(
+        strategy_path=EXAMPLE_STRATEGY, data_path=EXAMPLE_DATA, environment=env
+    )
+
+    cert_path = tmp_path / "certificate.json"
+    cert_path.write_text(cert.to_json(), encoding="utf-8")
+
+    loaded = json.loads(cert_path.read_text(encoding="utf-8"))
+    reconstructed = BacktestCertificate.from_dict(loaded)
+    assert reconstructed.to_dict() == cert.to_dict()

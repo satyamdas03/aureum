@@ -48,8 +48,7 @@ class StrategyReflector:
     ) -> BacktestCertificate:
         if certificate_path is not None:
             raw = Path(certificate_path).read_text(encoding="utf-8")
-            data = json.loads(raw)
-            return BacktestCertificate(**data)
+            return BacktestCertificate.from_dict(json.loads(raw))
 
         data_obj = MarketData.from_csv(data_path)
         runner = BacktestRunner(

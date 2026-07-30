@@ -220,6 +220,64 @@ class BacktestCertificate:
     def to_json(self, indent: int = 2) -> str:
         return json.dumps(self.to_dict(), indent=indent, default=str, sort_keys=False)
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "BacktestCertificate":
+        """Reconstruct a BacktestCertificate from a plain dictionary."""
+        env = data["environment"]
+        inputs = data["inputs"]
+        execution = data["execution"]
+        results = data["results"]
+        determinism = data["determinism"]
+
+        return cls(
+            aureum_version=data["aureum_version"],
+            certificate_spec_version=data["certificate_spec_version"],
+            generated_at=data["generated_at"],
+            environment=Environment(
+                aureum_version=env["aureum_version"],
+                git_commit=env["git_commit"],
+                git_dirty=env["git_dirty"],
+                python_version=env["python_version"],
+                platform=env["platform"],
+                dependencies_digest=env.get("dependencies_digest", ""),
+            ),
+            inputs=Inputs(
+                strategy=InputLineage(
+                    path=inputs["strategy"]["path"],
+                    sha256=inputs["strategy"]["sha256"],
+                    metadata=inputs["strategy"].get("metadata", {}),
+                ),
+                data=InputLineage(
+                    path=inputs["data"]["path"],
+                    sha256=inputs["data"]["sha256"],
+                    metadata=inputs["data"].get("metadata", {}),
+                ),
+            ),
+            execution=ExecutionSummary(
+                start_date=execution["start_date"],
+                end_date=execution["end_date"],
+                initial_nav=execution["initial_nav"],
+                rebalance_count=execution["rebalance_count"],
+                trades=execution["trades"],
+            ),
+            results=Results(
+                final_nav=results["final_nav"],
+                total_return=results["total_return"],
+                cagr=results["cagr"],
+                volatility_annual=results["volatility_annual"],
+                sharpe_ratio=results.get("sharpe_ratio"),
+                max_drawdown=results["max_drawdown"],
+                turnover_annual=results["turnover_annual"],
+            ),
+            risk_constraints=data["risk_constraints"],
+            execution_trace=data.get("execution_trace", {}),
+            determinism=Determinism(
+                input_hash=determinism["input_hash"],
+                result_hash=determinism["result_hash"],
+                tolerance=determinism.get("tolerance", "1e-6 relative + 1e-9 absolute"),
+            ),
+        )
+
     def with_draft_lineage(self, draft_lineage: dict[str, Any]) -> "BacktestCertificate":
         """Return a new certificate with draft lineage injected into execution_trace."""
         new_trace = dict(self.execution_trace)
