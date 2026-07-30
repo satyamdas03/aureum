@@ -53,3 +53,4 @@ data/
 
 # MkDocs build output
 site/
+.worktrees/
