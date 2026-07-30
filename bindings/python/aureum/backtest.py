@@ -24,6 +24,15 @@ from aureum.certificate import (
     Inputs,
     hash_file,
 )
+from aureum.quantity import (
+    DOLLARS,
+    PRICE_PER_SHARE,
+    RETURN,
+    SHARE_COUNT,
+    USD,
+    Quantity,
+    Unit,
+)
 from aureum.strategy import Strategy
 from aureum.verifier import verify_constraints
 
@@ -120,6 +129,14 @@ class MarketData:
 
 
 @dataclass
+class DimensionalError:
+    """Record of a unit-mismatch caught during execution."""
+
+    step: str
+    message: str
+
+
+@dataclass
 class BacktestResult:
     """Serializable backtest report."""
 
@@ -138,6 +155,7 @@ class BacktestResult:
     turnover_annual: float
     max_leverage: float
     max_concentration: float
+    dimensional_errors: list[DimensionalError]
     daily_nav: list[dict[str, Any]] = field(default_factory=list)
     daily_positions: list[dict[str, Any]] = field(default_factory=list)
     rebalance_log: list[dict[str, Any]] = field(default_factory=list)
@@ -161,6 +179,9 @@ class BacktestResult:
             "turnover_annual": round(self.turnover_annual, 6),
             "max_leverage": round(self.max_leverage, 6),
             "max_concentration": round(self.max_concentration, 6),
+            "dimensional_errors": [
+                {"step": e.step, "message": e.message} for e in self.dimensional_errors
+            ],
             "daily_nav": self.daily_nav,
             "daily_positions": self.daily_positions,
             "rebalance_log": self.rebalance_log,
@@ -199,11 +220,12 @@ class BacktestRunner:
         if signal_fn is None:
             raise ValueError(f"unknown signal: {signal_name!r}")
 
-        positions: dict[str, float] = {}
-        cash = self.initial_nav
+        positions: dict[str, Quantity] = {}
+        cash = Quantity(self.initial_nav, Unit.base(USD), "initial_nav")
         daily_nav: list[dict[str, Any]] = []
         daily_positions: list[dict[str, Any]] = []
         rebalance_log: list[dict[str, Any]] = []
+        dimensional_errors: list[DimensionalError] = []
         trades = 0
         cumulative_turnover = 0.0
         max_leverage = 0.0
@@ -215,31 +237,18 @@ class BacktestRunner:
             nav = self._portfolio_value(date, positions, cash)
             daily_nav.append({"date": date.isoformat(), "nav": round(nav, 4)})
 
-            gross_value = sum(
-                abs(shares * price)
-                for symbol, shares in positions.items()
-                if (price := self.data.price(date, symbol)) is not None
-            )
+            gross_value = self._gross_position_value(date, positions)
             leverage = gross_value / nav if nav > 0 else 0.0
             concentration = (
-                max(
-                    (
-                        abs(shares * price) / nav
-                        for symbol, shares in positions.items()
-                        if (price := self.data.price(date, symbol)) is not None
-                    ),
-                    default=0.0,
-                )
-                if nav > 0
-                else 0.0
+                self._max_position_value(date, positions) / nav if nav > 0 else 0.0
             )
             max_leverage = max(max_leverage, leverage)
             max_concentration = max(max_concentration, concentration)
             daily_positions.append(
                 {
                     "date": date.isoformat(),
-                    "cash": round(cash, 4),
-                    "positions": {s: round(v, 6) for s, v in sorted(positions.items())},
+                    "cash": round(cash.value, 4),
+                    "positions": {s: round(v.value, 6) for s, v in sorted(positions.items())},
                     "leverage": round(leverage, 6),
                     "concentration": round(concentration, 6),
                 }
@@ -266,35 +275,60 @@ class BacktestRunner:
                 target_weight = 1.0 / len(selected)
                 target_values = {s: nav * target_weight for s in selected}
 
-                new_positions: dict[str, float] = {}
+                new_positions: dict[str, Quantity] = {}
                 new_cash = cash
                 turnover_notional = 0.0
                 relevant_symbols = set(selected) | set(positions.keys())
                 for symbol in relevant_symbols:
-                    price = self.data.price(date, symbol)
-                    if price is None or price <= 0:
+                    raw_price = self.data.price(date, symbol)
+                    if raw_price is None or raw_price <= 0:
                         continue
 
-                    target_value = target_values.get(symbol, 0.0)
-                    target_shares = target_value / price
-                    current_shares = positions.get(symbol, 0.0)
-                    delta_shares = target_shares - current_shares
+                    price = Quantity(raw_price, PRICE_PER_SHARE, f"price:{symbol}")
+                    target_value = Quantity(
+                        target_values.get(symbol, 0.0), DOLLARS, "target_value"
+                    )
+                    current_shares = positions.get(
+                        symbol, Quantity(0.0, SHARE_COUNT, "zero")
+                    )
 
-                    if delta_shares > 0:
-                        exec_price = price * (1.0 + slippage)
-                    else:
-                        exec_price = price * (1.0 - slippage)
+                    try:
+                        target_shares = target_value.divide(price)
+                        delta_shares = target_shares.add(
+                            Quantity(-current_shares.value, SHARE_COUNT, "neg_current")
+                        )
 
-                    adjusted_delta = target_value / exec_price - current_shares
-                    new_positions[symbol] = current_shares + adjusted_delta
-                    cash_spent = adjusted_delta * exec_price
-                    new_cash -= cash_spent
+                        if delta_shares.value > 0:
+                            exec_price = price.multiply(
+                                Quantity(1.0 + slippage, Unit.dimensionless(), "slippage")
+                            )
+                        else:
+                            exec_price = price.multiply(
+                                Quantity(1.0 - slippage, Unit.dimensionless(), "slippage")
+                            )
 
-                    if abs(adjusted_delta) > 1e-9:
-                        trades += 1
-                    turnover_notional += abs(cash_spent)
+                        adjusted_delta_qty = target_value.divide(exec_price).add(
+                            Quantity(-current_shares.value, SHARE_COUNT, "neg_current")
+                        )
+                        new_positions[symbol] = current_shares.add(adjusted_delta_qty)
+                        cash_spent = adjusted_delta_qty.multiply(exec_price)
+                        new_cash = new_cash.add(
+                            Quantity(-cash_spent.value, DOLLARS, "cash_spent")
+                        )
 
-                positions = {s: v for s, v in new_positions.items() if abs(v) > 1e-9}
+                        adjusted_delta = adjusted_delta_qty.value
+                        if abs(adjusted_delta) > 1e-9:
+                            trades += 1
+                        turnover_notional += abs(cash_spent.value)
+                    except (ValueError, ZeroDivisionError) as exc:
+                        dimensional_errors.append(
+                            DimensionalError(
+                                step=f"rebalance:{date}:{symbol}", message=str(exc)
+                            )
+                        )
+                        new_positions[symbol] = current_shares
+
+                positions = {s: v for s, v in new_positions.items() if abs(v.value) > 1e-9}
                 cash = new_cash
                 cumulative_turnover += turnover_notional / nav if nav > 0 else 0.0
 
@@ -329,6 +363,7 @@ class BacktestRunner:
             turnover_annual=cumulative_turnover,
             max_leverage=max_leverage,
             max_concentration=max_concentration,
+            dimensional_errors=dimensional_errors,
             daily_nav=daily_nav,
             daily_positions=daily_positions,
             rebalance_log=rebalance_log,
@@ -399,14 +434,33 @@ class BacktestRunner:
         return sum(rec["close"] * rec["volume"] for rec in window) / len(window)
 
     def _portfolio_value(
-        self, date: dt.date, positions: dict[str, float], cash: float
+        self, date: dt.date, positions: dict[str, Quantity], cash: Quantity
     ) -> float:
-        value = cash
+        value = cash.value
         for symbol, shares in positions.items():
-            price = self.data.price(date, symbol)
-            if price is not None:
-                value += shares * price
+            raw_price = self.data.price(date, symbol)
+            if raw_price is not None:
+                value += shares.value * raw_price
         return value
+
+    def _gross_position_value(
+        self, date: dt.date, positions: dict[str, Quantity]
+    ) -> float:
+        return sum(
+            abs(qty.value * raw_price)
+            for symbol, qty in positions.items()
+            if (raw_price := self.data.price(date, symbol)) is not None
+        )
+
+    def _max_position_value(
+        self, date: dt.date, positions: dict[str, Quantity]
+    ) -> float:
+        values = [
+            abs(qty.value * raw_price)
+            for symbol, qty in positions.items()
+            if (raw_price := self.data.price(date, symbol)) is not None
+        ]
+        return max(values) if values else 0.0
 
     def _cagr(self, total_return: float) -> float:
         dates = self.data.dates

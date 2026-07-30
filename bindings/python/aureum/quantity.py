@@ -84,6 +84,12 @@ class Unit:
             return "1 / " + " * ".join(den)
         return " * ".join(num)
 
+    def __mul__(self, other: Unit) -> Unit:
+        return self.multiply(other)
+
+    def __truediv__(self, other: Unit) -> Unit:
+        return self.divide(other)
+
 
 @dataclass(frozen=True)
 class Quantity:
@@ -126,3 +132,17 @@ class Quantity:
 
     def __repr__(self) -> str:
         return f"Quantity({self.value}, {self.unit}, source={self.source!r})"
+
+
+# Common financial dimensions used by the backtest runner.
+USD = Dimension("USD")
+SHARES = Dimension("shares")
+RETURN = Dimension("return")
+
+# Common financial units. PRICE is intentionally derived as USD per share so
+# that notional / price = shares algebra is dimensionally valid.
+DOLLARS = Unit.base(USD)
+SHARE_COUNT = Unit.base(SHARES)
+PRICE_PER_SHARE = DOLLARS / SHARE_COUNT
+RATE = Unit.base(RETURN)
+
