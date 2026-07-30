@@ -1,5 +1,6 @@
 import { Check, X, AlertTriangle } from "lucide-react";
 import type { Certificate, RiskConstraint } from "../types";
+import CertificateSeal from "./CertificateSeal";
 
 function formatPct(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "—";
@@ -46,21 +47,18 @@ export default function CertificateViewer({
     );
   }
 
+  const allPassed = certificate.risk_constraints.every((c) => c.passed);
+
   return (
     <div className="h-full overflow-auto p-4 space-y-6">
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded bg-aureum-gold/10 flex items-center justify-center">
-          <Check className="w-5 h-5 text-aureum-gold" />
-        </div>
-        <div>
-          <h3 className="font-display text-lg font-semibold text-aureum-cream">
-            Backtest Certificate
-          </h3>
-          <p className="text-xs text-aureum-muted">
-            {certificate.generated_at} · v{certificate.aureum_version}
-          </p>
-        </div>
-      </div>
+      <CertificateSeal
+        strategyName={certificate.strategy_name}
+        strategyHash={certificate.inputs.strategy.sha256}
+        dataHash={certificate.inputs.data.sha256}
+        generatedAt={certificate.generated_at}
+        version={certificate.aureum_version}
+        passed={allPassed}
+      />
 
       <div className="grid grid-cols-2 gap-3">
         <div className="p-3 rounded bg-aureum-panel">
