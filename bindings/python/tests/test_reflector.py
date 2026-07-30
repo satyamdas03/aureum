@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from click.testing import CliRunner
+
+from aureum.cli import cli
 from aureum.reflector import ReflectionResult, StrategyReflector
 
 
@@ -102,3 +105,37 @@ def test_reflector_keeps_drafts_when_fix_fails(tmp_path: Path, monkeypatch):
     assert (tmp_path / "fixed.001.yaml").exists()
     assert (tmp_path / "fixed.002.yaml").exists()
     assert not (tmp_path / "fixed.yaml").exists()
+
+
+def test_reflect_cli_with_mocked_llm(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake")
+    import aureum.reflector as reflector_module
+    original = reflector_module.AnthropicClient
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+        def complete(self, prompt, *, max_tokens=4096):
+            return f"```yaml\n{_fixed_strategy_yaml()}\n```\nFixed."
+
+    out = tmp_path / "fixed.yaml"
+    runner = CliRunner()
+    try:
+        reflector_module.AnthropicClient = FakeClient  # type: ignore[misc]
+        result = runner.invoke(
+            cli,
+            [
+                "reflect",
+                str(EXAMPLE_STRATEGY),
+                "--data",
+                str(EXAMPLE_DATA),
+                "--output",
+                str(out),
+                "--max-attempts",
+                "1",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert out.exists()
+    finally:
+        reflector_module.AnthropicClient = original  # type: ignore[misc]

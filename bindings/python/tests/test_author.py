@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from click.testing import CliRunner
+
 from aureum.author import StrategyAuthor
+from aureum.cli import cli
 from aureum.strategy import Strategy
 
 
@@ -72,3 +77,35 @@ def test_author_retries_on_validation_error():
     assert Strategy.from_yaml(yaml_text).validate() == []
     assert len(client.calls) == 2
     assert "metadata.name is required" in client.calls[1]
+
+
+def test_author_cli_writes_yaml(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake")
+    out = tmp_path / "ai.yaml"
+    runner = CliRunner()
+
+    # Patch AnthropicClient.complete inside the CLI path.
+    import aureum.author as author_module
+    original = author_module.AnthropicClient
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+        def complete(self, prompt, *, max_tokens=4096):
+            return f"```yaml\n{_valid_strategy_yaml()}\n```\nRationale: test"
+
+    try:
+        author_module.AnthropicClient = FakeClient  # type: ignore[misc]
+        result = runner.invoke(
+            cli,
+            [
+                "author",
+                "tech momentum strategy",
+                "--output",
+                str(out),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert out.exists()
+    finally:
+        author_module.AnthropicClient = original  # type: ignore[misc]
