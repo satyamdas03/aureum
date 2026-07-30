@@ -1,9 +1,11 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: "class",
   content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
   theme: {
     extend: {
       colors: {
+        // Aureum custom legacy scale
         aureum: {
           ink: "#0B0F19",
           panel: "#111827",
@@ -17,20 +19,149 @@ export default {
           danger: "#EF4444",
           warning: "#F59E0B",
         },
+        // Stitch Deep Space Material 3 scale
+        surface: {
+          DEFAULT: "#14140f",
+          dim: "#14140f",
+          bright: "#3a3933",
+          "container-lowest": "#0f0e0a",
+          "container-low": "#1c1c16",
+          "container": "#20201a",
+          "container-high": "#2b2a24",
+          "container-highest": "#36352f",
+          variant: "#36352f",
+        },
+        "on-surface": {
+          DEFAULT: "#e6e2d9",
+          variant: "#d1c5af",
+        },
+        "inverse-surface": "#e6e2d9",
+        "inverse-on-surface": "#31302b",
+        outline: {
+          DEFAULT: "#99907b",
+          variant: "#4d4635",
+        },
+        "surface-tint": "#ecc246",
+        primary: {
+          DEFAULT: "#ecc246",
+          container: "#c9a227",
+          fixed: "#ffe08e",
+          "fixed-dim": "#ecc246",
+        },
+        "on-primary": {
+          DEFAULT: "#3d2e00",
+          container: "#4b3a00",
+          fixed: "#241a00",
+          "fixed-variant": "#584400",
+        },
+        "inverse-primary": "#755b00",
+        secondary: {
+          DEFAULT: "#c0c6db",
+          container: "#404758",
+          fixed: "#dce2f7",
+          "fixed-dim": "#c0c6db",
+        },
+        "on-secondary": {
+          DEFAULT: "#293040",
+          container: "#aeb5c9",
+          fixed: "#141b2b",
+          "fixed-variant": "#404758",
+        },
+        tertiary: {
+          DEFAULT: "#bec6dd",
+          container: "#9ea6bc",
+          fixed: "#dae2fa",
+          "fixed-dim": "#bec6dd",
+        },
+        "on-tertiary": {
+          DEFAULT: "#283042",
+          container: "#343c4e",
+          fixed: "#131b2c",
+          "fixed-variant": "#3f4759",
+        },
+        error: {
+          DEFAULT: "#ffb4ab",
+          container: "#93000a",
+        },
+        "on-error": {
+          DEFAULT: "#690005",
+          container: "#ffdad6",
+        },
+        background: "#14140f",
+        "on-background": "#e6e2d9",
+        // Convenience aliases
+        "deep-navy": "#0B0F19",
+        "aureum-gold": "#C9A227",
+        cream: "#F5F1E8",
+        slate: "#8A91A8",
+        muted: "#5B6275",
+        panel: "#111827",
+        card: "#1A2233",
+        success: "#22C55E",
+        warning: "#F59E0B",
+        danger: "#EF4444",
       },
       fontFamily: {
-        display: ["Crimson Pro", "Georgia", "serif"],
+        display: ["Literata", "Crimson Pro", "Georgia", "serif"],
         sans: ["Inter", "system-ui", "sans-serif"],
         mono: ["JetBrains Mono", "monospace"],
+        // Named tokens from design system
+        "hero-lg": ["Literata", "Crimson Pro", "Georgia", "serif"],
+        h1: ["Literata", "Crimson Pro", "Georgia", "serif"],
+        h2: ["Literata", "Crimson Pro", "Georgia", "serif"],
+        "body-lg": ["Inter", "system-ui", "sans-serif"],
+        "body-md": ["Inter", "system-ui", "sans-serif"],
+        "mono-label": ["JetBrains Mono", "monospace"],
+        "mono-data": ["JetBrains Mono", "monospace"],
+        crimson: ["Crimson Pro", "Georgia", "serif"],
+      },
+      fontSize: {
+        "hero-lg": ["72px", { lineHeight: "84px", letterSpacing: "-0.02em", fontWeight: "600" }],
+        "hero-lg-mobile": ["48px", { lineHeight: "56px", fontWeight: "600" }],
+        h1: ["48px", { lineHeight: "56px", fontWeight: "500" }],
+        "h1-mobile": ["32px", { lineHeight: "40px", fontWeight: "500" }],
+        h2: ["32px", { lineHeight: "40px", fontWeight: "500" }],
+        "body-lg": ["16px", { lineHeight: "24px", fontWeight: "400" }],
+        "body-md": ["14px", { lineHeight: "20px", fontWeight: "400" }],
+        "mono-label": ["13px", { lineHeight: "16px", letterSpacing: "0.02em", fontWeight: "500" }],
+        "mono-data": ["12px", { lineHeight: "16px", fontWeight: "400" }],
+      },
+      borderRadius: {
+        sm: "0.125rem",
+        DEFAULT: "0.25rem",
+        md: "0.375rem",
+        lg: "0.5rem",
+        xl: "0.75rem",
+        full: "9999px",
+      },
+      spacing: {
+        unit: "4px",
+        xs: "4px",
+        sm: "8px",
+        md: "16px",
+        lg: "24px",
+        xl: "48px",
+        gutter: "16px",
+        "margin-mobile": "16px",
+        "margin-desktop": "32px",
+        "container-max": "1280px",
+      },
+      boxShadow: {
+        certificate: "0 0 15px rgba(201, 162, 39, 0.05)",
       },
       animation: {
         "pulse-slow": "pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite",
-        "flow": "flow 2s ease-in-out infinite",
+        flow: "flow 2s ease-in-out infinite",
+        "fade-up": "fadeUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) both",
       },
       keyframes: {
         flow: {
           "0%, 100%": { opacity: "0.4", transform: "translateX(0)" },
           "50%": { opacity: "1", transform: "translateX(4px)" },
+        },
+        fadeUp: {
+          from: { opacity: "0", transform: "translateY(16px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
         },
       },
     },

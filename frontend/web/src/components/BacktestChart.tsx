@@ -18,7 +18,7 @@ export default function BacktestChart({
 
   if (!data.length) {
     return (
-      <div className="h-64 flex items-center justify-center text-aureum-muted text-sm">
+      <div className="h-48 flex items-center justify-center text-slate font-mono-data text-mono-data">
         Run a backtest to see the NAV curve.
       </div>
     );
@@ -27,7 +27,7 @@ export default function BacktestChart({
   const initial = data[0]?.nav ?? 1;
 
   return (
-    <div className="h-64 w-full">
+    <div className="h-48 w-full">
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={data}>
           <defs>
@@ -36,23 +36,27 @@ export default function BacktestChart({
               <stop offset="95%" stopColor="#C9A227" stopOpacity={0} />
             </linearGradient>
           </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="#374151" vertical={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke="#1A2233" vertical={false} />
           <XAxis
             dataKey="date"
             tick={{ fill: "#8A91A8", fontSize: 10 }}
             tickFormatter={(date: string) => date.slice(0, 7)}
             minTickGap={30}
+            axisLine={{ stroke: "#1A2233" }}
+            tickLine={false}
           />
           <YAxis
             tick={{ fill: "#8A91A8", fontSize: 10 }}
             domain={["auto", "auto"]}
             tickFormatter={(v: number) => `$${(v / 1000).toFixed(0)}k`}
+            axisLine={{ stroke: "#1A2233" }}
+            tickLine={false}
           />
           <Tooltip
             contentStyle={{
               backgroundColor: "#111827",
-              border: "1px solid #374151",
-              borderRadius: "6px",
+              border: "1px solid #1A2233",
+              borderRadius: "4px",
               color: "#F5F1E8",
             }}
             formatter={(value: number) => [

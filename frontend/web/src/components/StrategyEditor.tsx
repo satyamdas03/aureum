@@ -12,7 +12,7 @@ export default function StrategyEditor({
   readOnly = false,
 }: StrategyEditorProps) {
   return (
-    <div className="h-full min-h-[400px] rounded-lg overflow-hidden border border-aureum-panel">
+    <div className="h-full w-full overflow-hidden bg-ink">
       <Editor
         value={value}
         language="yaml"
@@ -27,8 +27,15 @@ export default function StrategyEditor({
           scrollBeyondLastLine: false,
           automaticLayout: true,
           padding: { top: 16 },
+          renderLineHighlight: "line",
+          matchBrackets: "always",
         }}
         onChange={(v) => onChange(v || "")}
+        loading={
+          <div className="h-full flex items-center justify-center text-slate font-mono-data text-mono-data">
+            Loading editor…
+          </div>
+        }
       />
     </div>
   );

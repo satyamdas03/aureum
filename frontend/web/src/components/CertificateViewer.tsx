@@ -10,10 +10,10 @@ function formatPct(value: number | null | undefined): string {
 function ConstraintRow({ constraint }: { constraint: RiskConstraint }) {
   const Icon = constraint.passed ? Check : constraint.hard ? X : AlertTriangle;
   const color = constraint.passed
-    ? "text-aureum-success border-aureum-success/30 bg-aureum-success/10"
+    ? "text-success border-success/30 bg-success/10"
     : constraint.hard
-    ? "text-aureum-danger border-aureum-danger/30 bg-aureum-danger/10"
-    : "text-aureum-warning border-aureum-warning/30 bg-aureum-warning/10";
+    ? "text-error border-error/30 bg-error/10"
+    : "text-warning border-warning/30 bg-warning/10";
 
   return (
     <div className={`flex items-center justify-between p-3 rounded border ${color}`}>
@@ -41,7 +41,7 @@ export default function CertificateViewer({
 }) {
   if (!certificate) {
     return (
-      <div className="h-full flex items-center justify-center text-aureum-muted">
+      <div className="h-full flex items-center justify-center text-slate font-body-md">
         Run a backtest to generate an Aureum Backtest Certificate.
       </div>
     );
@@ -52,51 +52,50 @@ export default function CertificateViewer({
   return (
     <div className="h-full overflow-auto p-4 space-y-6">
       <CertificateSeal
+        compact
         strategyName={certificate.strategy_name}
         strategyHash={certificate.inputs.strategy.sha256}
-        dataHash={certificate.inputs.data.sha256}
         generatedAt={certificate.generated_at}
-        version={certificate.aureum_version}
         passed={allPassed}
       />
 
       <div className="grid grid-cols-2 gap-3">
-        <div className="p-3 rounded bg-aureum-panel">
-          <p className="text-xs text-aureum-muted uppercase">Total Return</p>
-          <p className="font-mono text-lg text-aureum-cream">
+        <div className="p-3 rounded bg-panel">
+          <p className="font-mono-label text-[10px] text-slate uppercase">Total Return</p>
+          <p className="font-mono-data text-lg text-cream">
             {formatPct(certificate.results.total_return)}
           </p>
         </div>
-        <div className="p-3 rounded bg-aureum-panel">
-          <p className="text-xs text-aureum-muted uppercase">Max Drawdown</p>
-          <p className="font-mono text-lg text-aureum-cream">
+        <div className="p-3 rounded bg-panel">
+          <p className="font-mono-label text-[10px] text-slate uppercase">Max Drawdown</p>
+          <p className="font-mono-data text-lg text-cream">
             {formatPct(certificate.results.max_drawdown)}
           </p>
         </div>
-        <div className="p-3 rounded bg-aureum-panel">
-          <p className="text-xs text-aureum-muted uppercase">Volatility</p>
-          <p className="font-mono text-lg text-aureum-cream">
+        <div className="p-3 rounded bg-panel">
+          <p className="font-mono-label text-[10px] text-slate uppercase">Volatility</p>
+          <p className="font-mono-data text-lg text-cream">
             {formatPct(certificate.results.volatility_annual)}
           </p>
         </div>
-        <div className="p-3 rounded bg-aureum-panel">
-          <p className="text-xs text-aureum-muted uppercase">Sharpe</p>
-          <p className="font-mono text-lg text-aureum-cream">
+        <div className="p-3 rounded bg-panel">
+          <p className="font-mono-label text-[10px] text-slate uppercase">Sharpe</p>
+          <p className="font-mono-data text-lg text-cream">
             {certificate.results.sharpe_ratio?.toFixed(2) ?? "—"}
           </p>
         </div>
       </div>
 
       <div className="space-y-2">
-        <h4 className="text-sm font-semibold text-aureum-cream">Risk Constraints</h4>
+        <h4 className="text-sm font-semibold text-cream">Risk Constraints</h4>
         {certificate.risk_constraints.map((c) => (
           <ConstraintRow key={c.name} constraint={c} />
         ))}
       </div>
 
       <div className="space-y-2">
-        <h4 className="text-sm font-semibold text-aureum-cream">Input Lineage</h4>
-        <div className="p-3 rounded bg-aureum-panel font-mono text-xs text-aureum-slate space-y-1">
+        <h4 className="text-sm font-semibold text-cream">Input Lineage</h4>
+        <div className="p-3 rounded bg-panel font-mono-data text-xs text-slate space-y-1">
           <p>Strategy: {certificate.inputs.strategy.sha256.slice(0, 16)}…</p>
           <p>Data: {certificate.inputs.data.sha256.slice(0, 16)}…</p>
         </div>

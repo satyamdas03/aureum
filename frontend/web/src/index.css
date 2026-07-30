@@ -6,36 +6,163 @@
   color-scheme: dark;
 }
 
-body {
-  @apply bg-aureum-ink text-aureum-cream antialiased;
-  font-family: "Inter", system-ui, sans-serif;
+html {
+  @apply bg-surface text-on-surface antialiased;
 }
 
+body {
+  @apply bg-surface text-on-surface antialiased;
+  font-family: "Inter", system-ui, sans-serif;
+  overflow-x: hidden;
+}
+
+/* Typography tokens */
 .font-display {
-  font-family: "Crimson Pro", Georgia, serif;
+  font-family: "Literata", "Crimson Pro", Georgia, serif;
 }
 
 .font-mono {
   font-family: "JetBrains Mono", monospace;
 }
 
-/* Custom scrollbar for dark panels */
+.font-hero-lg {
+  font-family: "Literata", "Crimson Pro", Georgia, serif;
+}
+
+.font-h1 {
+  font-family: "Literata", "Crimson Pro", Georgia, serif;
+}
+
+.font-h2 {
+  font-family: "Literata", "Crimson Pro", Georgia, serif;
+}
+
+.font-body-lg {
+  font-family: "Inter", system-ui, sans-serif;
+}
+
+.font-body-md {
+  font-family: "Inter", system-ui, sans-serif;
+}
+
+.font-mono-label {
+  font-family: "JetBrains Mono", monospace;
+}
+
+.font-mono-data {
+  font-family: "JetBrains Mono", monospace;
+}
+
+/* Staggered entrance animations */
+.stagger-1 {
+  animation: fadeUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) 0.1s both;
+}
+
+.stagger-2 {
+  animation: fadeUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both;
+}
+
+.stagger-3 {
+  animation: fadeUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) 0.3s both;
+}
+
+.stagger-4 {
+  animation: fadeUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) 0.4s both;
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Certificate corner hash marks */
+.hash-mark-tl {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 8px;
+  height: 8px;
+  border-top: 1px solid #C9A227;
+  border-left: 1px solid #C9A227;
+}
+
+.hash-mark-tr {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-top: 1px solid #C9A227;
+  border-right: 1px solid #C9A227;
+}
+
+.hash-mark-bl {
+  position: absolute;
+  bottom: 4px;
+  left: 4px;
+  width: 8px;
+  height: 8px;
+  border-bottom: 1px solid #C9A227;
+  border-left: 1px solid #C9A227;
+}
+
+.hash-mark-br {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-bottom: 1px solid #C9A227;
+  border-right: 1px solid #C9A227;
+}
+
+/* Syntax highlighting for YAML previews */
+.yaml-key {
+  color: #C9A227;
+}
+
+.yaml-value {
+  color: #8A91A8;
+}
+
+.yaml-string {
+  color: #e6e2d9;
+}
+
+.yaml-comment {
+  color: #4d4635;
+  font-style: italic;
+}
+
+/* Custom scrollbar for dark surfaces */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #111827;
+  background: #0B0F19;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #374151;
+  background: #1A2233;
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #4b5563;
+  background: #4d4635;
+}
+
+/* Selection */
+::selection {
+  background: #C9A227;
+  color: #0B0F19;
 }
 
 /* Reduced motion */

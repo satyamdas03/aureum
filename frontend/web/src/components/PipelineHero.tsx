@@ -3,9 +3,9 @@ import { Terminal, FileText, Play, ShieldCheck } from "lucide-react";
 
 const steps = [
   { icon: Terminal, label: "Prompt", color: "text-aureum-gold" },
-  { icon: FileText, label: "YAML", color: "text-aureum-gold-soft" },
+  { icon: FileText, label: "YAML", color: "text-primary" },
   { icon: Play, label: "Backtest", color: "text-aureum-gold" },
-  { icon: ShieldCheck, label: "Certificate", color: "text-aureum-success" },
+  { icon: ShieldCheck, label: "Certificate", color: "text-success" },
 ];
 
 export default function PipelineHero() {
@@ -34,13 +34,13 @@ export default function PipelineHero() {
                   ${
                     isActive
                       ? "border-aureum-gold bg-aureum-gold/10 shadow-[0_0_20px_rgba(201,162,39,0.25)]"
-                      : "border-aureum-muted bg-aureum-panel"
+                      : "border-muted bg-panel"
                   }
                 `}
               >
                 <Icon
                   className={`w-5 h-5 md:w-6 md:h-6 transition-colors duration-500 ${
-                    isActive ? step.color : "text-aureum-muted"
+                    isActive ? step.color : "text-muted"
                   }`}
                 />
                 {isCurrent && (
@@ -49,17 +49,11 @@ export default function PipelineHero() {
               </div>
               <span
                 className={`mt-3 text-xs md:text-sm font-medium transition-colors duration-500 ${
-                  isActive ? "text-aureum-cream" : "text-aureum-muted"
+                  isActive ? "text-cream" : "text-muted"
                 }`}
               >
                 {step.label}
               </span>
-
-              {index < steps.length - 1 && (
-                <div className="absolute left-0 right-0 top-8 md:top-10 -z-10 px-8 md:px-12">
-                  {/* connector handled via parent flex; no absolute needed */}
-                </div>
-              )}
             </div>
           );
         })}
@@ -73,7 +67,7 @@ export default function PipelineHero() {
             <div key={index} className="flex-1 h-px mx-2">
               <div
                 className={`h-full transition-all duration-700 ${
-                  filled ? "bg-aureum-gold" : "bg-aureum-muted/40"
+                  filled ? "bg-aureum-gold" : "bg-muted/40"
                 }`}
               />
             </div>

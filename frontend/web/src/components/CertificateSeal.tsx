@@ -1,13 +1,12 @@
-import { Check, Lock } from "lucide-react";
+import { Lock, Verified } from "lucide-react";
 
 interface CertificateSealProps {
   strategyName?: string;
   strategyHash?: string;
-  dataHash?: string;
   generatedAt?: string;
-  version?: string;
   passed?: boolean;
   className?: string;
+  compact?: boolean;
 }
 
 function truncateHash(hash?: string): string {
@@ -18,68 +17,80 @@ function truncateHash(hash?: string): string {
 export default function CertificateSeal({
   strategyName,
   strategyHash,
-  dataHash,
   generatedAt,
-  version,
   passed = true,
   className = "",
+  compact = false,
 }: CertificateSealProps) {
-  return (
-    <div className={`relative p-6 bg-aureum-card border border-aureum-gold/40 rounded-lg overflow-hidden ${className}`}>
-      {/* Corner hash marks */}
-      <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-aureum-gold/60" />
-      <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-aureum-gold/60" />
-      <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-aureum-gold/60" />
-      <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-aureum-gold/60" />
-
-      {/* Top gold accent bar */}
-      <div className="absolute top-0 left-0 right-0 h-0.5 bg-aureum-gold" />
-
-      <div className="relative flex items-start gap-4">
-        <div className="shrink-0 w-14 h-14 rounded-full bg-aureum-gold/10 border border-aureum-gold/40 flex items-center justify-center">
+  if (compact) {
+    return (
+      <div
+        className={`relative bg-card border border-aureum-gold p-md flex flex-col items-center justify-center text-center shadow-certificate ${className}`}
+      >
+        <div className="hash-mark-tl" />
+        <div className="hash-mark-tr" />
+        <div className="hash-mark-bl" />
+        <div className="hash-mark-br" />
+        <div className="w-12 h-12 rounded-full border border-aureum-gold flex items-center justify-center mb-md bg-ink">
           {passed ? (
-            <Check className="w-7 h-7 text-aureum-gold" strokeWidth={2.5} />
+            <Verified className="text-aureum-gold w-6 h-6" strokeWidth={1.5} />
           ) : (
-            <Lock className="w-7 h-7 text-aureum-gold" strokeWidth={2} />
+            <Lock className="text-aureum-gold w-6 h-6" strokeWidth={1.5} />
           )}
         </div>
-
-        <div className="flex-1 min-w-0">
-          <p className="text-[10px] font-semibold tracking-[0.15em] uppercase text-aureum-gold mb-1">
-            Aureum Backtest Certificate
-          </p>
-          <h3 className="font-display text-xl font-semibold text-aureum-cream truncate">
-            {strategyName || "Untitled Strategy"}
-          </h3>
-
-          <div className="mt-4 space-y-2 font-mono text-xs text-aureum-slate">
-            <div className="flex items-center gap-2">
-              <span className="text-aureum-muted w-20 shrink-0">Strategy</span>
-              <span className="truncate">{truncateHash(strategyHash)}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-aureum-muted w-20 shrink-0">Data</span>
-              <span className="truncate">{truncateHash(dataHash)}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-aureum-muted w-20 shrink-0">Generated</span>
-              <span>{generatedAt ? new Date(generatedAt).toLocaleString() : "—"}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-aureum-muted w-20 shrink-0">Version</span>
-              <span>{version || "—"}</span>
-            </div>
-          </div>
+        <h3 className="font-mono-label text-mono-label text-aureum-gold tracking-widest uppercase mb-sm">
+          {passed ? "Strategy Verified" : "Not Verified"}
+        </h3>
+        <p className="font-body-md text-[12px] text-slate mb-md">
+          {strategyName || "Untitled Strategy"}
+        </p>
+        <div className="mt-auto w-full pt-sm border-t border-panel flex flex-col gap-1">
+          <span className="font-mono-data text-[10px] text-outline-variant text-left">
+            SHA-256 Checksum
+          </span>
+          <span className="font-mono-data text-[11px] text-slate truncate">
+            {truncateHash(strategyHash)}
+          </span>
+          <span className="font-mono-data text-[10px] text-outline-variant text-right mt-1">
+            TS: {generatedAt ? Math.floor(new Date(generatedAt).getTime() / 1000) : "—"}
+          </span>
         </div>
       </div>
+    );
+  }
 
-      {/* Status footer */}
-      <div className="relative mt-5 pt-4 border-t border-aureum-gold/20 flex items-center justify-between">
-        <span className="text-xs font-semibold uppercase tracking-wider text-aureum-gold">
-          {passed ? "Verified" : "Not verified"}
+  return (
+    <div
+      className={`relative bg-card border border-aureum-gold p-6 flex flex-col items-center justify-center text-center shadow-certificate ${className}`}
+    >
+      <div className="hash-mark-tl" />
+      <div className="hash-mark-tr" />
+      <div className="hash-mark-bl" />
+      <div className="hash-mark-br" />
+      <div className="w-12 h-12 rounded-full border border-aureum-gold flex items-center justify-center mb-md bg-ink">
+        {passed ? (
+          <Verified className="text-aureum-gold w-6 h-6" strokeWidth={1.5} />
+        ) : (
+          <Lock className="text-aureum-gold w-6 h-6" strokeWidth={1.5} />
+        )}
+      </div>
+      <h3 className="font-mono-label text-mono-label text-aureum-gold tracking-widest uppercase mb-sm">
+        {passed ? "Strategy Verified" : "Not Verified"}
+      </h3>
+      <p className="font-body-md text-[12px] text-slate mb-md">
+        {passed
+          ? "Syntax and logic parameters passed static analysis."
+          : "One or more hard constraints failed verification."}
+      </p>
+      <div className="mt-auto w-full pt-sm border-t border-panel flex flex-col gap-1">
+        <span className="font-mono-data text-[10px] text-outline-variant text-left">
+          SHA-256 Checksum
         </span>
-        <span className="font-mono text-[10px] text-aureum-muted">
-          SHA-256 content-addressed
+        <span className="font-mono-data text-[11px] text-slate truncate">
+          {truncateHash(strategyHash)}
+        </span>
+        <span className="font-mono-data text-[10px] text-outline-variant text-right mt-1">
+          TS: {generatedAt ? Math.floor(new Date(generatedAt).getTime() / 1000) : "—"}
         </span>
       </div>
     </div>
