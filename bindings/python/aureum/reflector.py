@@ -126,6 +126,11 @@ class StrategyReflector:
                 current_yaml = new_yaml
                 continue
 
+            # Materialise the candidate so the certificate's input lineage SHA-256
+            # matches the YAML that actually produced the backtest results.
+            draft_path = self._next_draft_path(output_path, attempt)
+            draft_path.write_text(new_yaml, encoding="utf-8")
+
             # Run backtest on the candidate.
             data_obj = MarketData.from_csv(data_path)
             runner = BacktestRunner(
@@ -133,14 +138,16 @@ class StrategyReflector:
             )
             env = get_environment(aureum_version="0.2.0", cwd=data_path.parent)
             certificate = runner.build_certificate(
-                strategy_path=strategy_path,
+                strategy_path=draft_path,
                 data_path=data_path,
                 environment=env,
             )
 
             if not self._has_hard_failures(certificate):
                 output_path.write_text(new_yaml, encoding="utf-8")
-                certificate = certificate.with_draft_lineage(
+                certificate = certificate.with_strategy_path(
+                    output_path
+                ).with_draft_lineage(
                     {
                         "attempts": attempt,
                         "drafts": [str(d) for d in drafts],
@@ -155,8 +162,6 @@ class StrategyReflector:
                     final_certificate=certificate,
                 )
 
-            draft_path = self._next_draft_path(output_path, attempt)
-            draft_path.write_text(new_yaml, encoding="utf-8")
             drafts.append(draft_path)
             current_yaml = new_yaml
 

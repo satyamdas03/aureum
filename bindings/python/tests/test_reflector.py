@@ -6,6 +6,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
+from aureum.certificate import hash_file
 from aureum.cli import cli
 from aureum.reflector import ReflectionResult, StrategyReflector
 
@@ -83,6 +84,26 @@ def test_reflector_fixes_buggy_slippage(tmp_path: Path):
         c.get("passed", False) for c in result.final_certificate.to_dict()["risk_constraints"] if c.get("hard")
     )
     assert hard_passed
+
+
+def test_reflector_accepted_certificate_lineage_matches_output_file(tmp_path: Path):
+    client = _FakeClient([f"```yaml\n{_fixed_strategy_yaml()}\n```\nFixed slippage from 0.05 to 0.0005."])
+    reflector = StrategyReflector(client)
+    output_path = tmp_path / "fixed.yaml"
+    result = reflector.reflect(
+        EXAMPLE_STRATEGY,
+        EXAMPLE_DATA,
+        output_path=output_path,
+        max_attempts=1,
+    )
+
+    assert result.success is True
+    certificate = result.final_certificate
+    assert certificate is not None
+    inputs = certificate.to_dict()["inputs"]
+    assert Path(inputs["strategy"]["path"]) == output_path
+    assert inputs["strategy"]["sha256"] == hash_file(output_path)
+    assert inputs["strategy"]["sha256"] != hash_file(EXAMPLE_STRATEGY)
 
 
 def test_reflector_keeps_drafts_when_fix_fails(tmp_path: Path, monkeypatch):

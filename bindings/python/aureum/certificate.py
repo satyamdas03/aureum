@@ -284,6 +284,27 @@ class BacktestCertificate:
         new_trace["draft_lineage"] = draft_lineage
         return dataclasses.replace(self, execution_trace=new_trace)
 
+    def with_strategy_path(self, path: str | Path) -> "BacktestCertificate":
+        """Return a new certificate with the strategy input path rewritten.
+
+        The strategy file content is assumed to be unchanged (e.g. the file was
+        moved/copied), so its SHA-256 stays the same. The input hash is
+        recomputed to reflect the new path.
+        """
+        new_inputs = dataclasses.replace(
+            self.inputs,
+            strategy=dataclasses.replace(
+                self.inputs.strategy, path=str(Path(path))
+            ),
+        )
+        new_input_hash = _sha256_text(_stable_json(new_inputs.to_dict()))
+        new_determinism = dataclasses.replace(
+            self.determinism, input_hash=new_input_hash
+        )
+        return dataclasses.replace(
+            self, inputs=new_inputs, determinism=new_determinism
+        )
+
 
 def hash_file(path: str | Path) -> str:
     """Public helper for hashing input files."""
