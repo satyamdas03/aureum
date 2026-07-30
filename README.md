@@ -94,10 +94,21 @@ aureum backtest examples/strategies/momentum.yaml \
   --data examples/data/synthetic_prices.csv \
   --certificate certificate.json
 
-# Or bundle inputs + certificate for model-risk review
+# Bundle inputs + certificate for model-risk review
 aureum backtest examples/strategies/momentum.yaml \
   --data examples/data/synthetic_prices.csv \
   --bundle momentum-run.tar.gz
+
+# Fetch a real market snapshot from Alpaca and version it by SHA-256
+aureum snapshot --symbols AAPL,MSFT,NVDA,GOOGL \
+  --start 2024-01-01 --end 2024-12-31 \
+  --output snapshots/tech_2024.csv
+
+# Emit SMT-LIB and Lean 4 proof obligations alongside the certificate
+aureum backtest examples/strategies/momentum.yaml \
+  --data examples/data/synthetic_prices.csv \
+  --certificate certificate.json \
+  --smt risk.smt2 --lean risk.lean
 ```
 
 ---
@@ -219,7 +230,7 @@ Aureum does not ask buyers to add a new budget line. It replaces the **semantic-
 |---|---|---|
 | **0** | Repo, docs, and buildable skeleton | ✅ Done |
 | **1** | Self-proving backtest: DSL + deterministic runner + ABC certificate | ✅ Done |
-| **2** | Dimensional type enforcement + real data adapter + Lean verifier bridge | Planned |
+| **2** | Dimensional type enforcement + real data adapter + Lean/SMT verifier bridge | ✅ Done |
 | **3** | AI authoring + reflection loop | Planned |
 | **4** | Multi-user surfaces (indie, fund, fintech, DeFi) | Planned |
 | **5** | Public launch + community | Planned |

@@ -139,18 +139,70 @@ print("Input hash:", cert.determinism.input_hash)
 print("All constraints passed:", all_passed(cert.risk_constraints))
 ```
 
-## What is "machine-checkable" in Phase 1?
+## Phase 2: dimensional types, real data, and theorem-prover bridges
 
-Phase 1 provides **model-risk evidence**, not a formal proof or regulator-signed
-artifact.  A validator can mechanically:
+### Dimensional type enforcement
 
-1. Recompute the SHA-256 of the bundled inputs and compare to the certificate.
-2. Re-run `aureum backtest` in the recorded environment and compare metrics to
-   the deterministic tolerance.
-3. Inspect the risk-constraint compliance list.
+Aureum's backtest runner now tracks cash, prices, shares, and notional values as
+dimensioned quantities.  `USD / (USD/share)` is `shares`; adding `USD` to
+`shares` raises a `ValueError` and is recorded in the certificate as a
+`DimensionalError`.  This prevents the classic unit-mismatch bugs that cost real
+money in quant systems.
 
-Formal proof (Lean / SMT) and cryptographic signing are on the roadmap for later
-phases.
+Under the hood the runner uses:
+
+- `DOLLARS` (`USD`)
+- `SHARE_COUNT` (`shares`)
+- `PRICE_PER_SHARE` (`USD / shares`)
+- `RATE` (dimensionless return)
+
+### Real market data snapshots
+
+The `aureum snapshot` command fetches daily bars from Alpaca and writes a
+deterministic CSV with a sidecar `.snapshot.json` file that records SHA-256
+hashes, symbols, date range, and feed.  The snapshot CSV can be fed directly
+into `aureum backtest --data ...` and its hash appears in the certificate's
+input lineage.
+
+```bash
+export ALPACA_API_KEY=...
+export ALPACA_SECRET_KEY=...
+
+aureum snapshot --symbols AAPL,MSFT,NVDA,GOOGL \
+  --start 2024-01-01 --end 2024-12-31 \
+  --output snapshots/tech_2024.csv
+
+aureum backtest examples/strategies/momentum.yaml \
+  --data snapshots/tech_2024.csv \
+  --certificate certificate.json
+```
+
+### SMT-LIB and Lean 4 verifier bridge
+
+The `--smt` and `--lean` flags export the certificate's risk-constraint claims
+as machine-checkable artefacts:
+
+```bash
+aureum backtest examples/strategies/momentum.yaml \
+  --data examples/data/synthetic_prices.csv \
+  --smt risk.smt2 --lean risk.lean
+```
+
+`risk.smt2` is a QF_LRA SMT-LIB script suitable for Z3, CVC5, or MathSAT.
+`risk.lean` is a Lean 4 file with one theorem per risk constraint proved by
+`norm_num`.  These are prototypes: they encode the *claims* of the certificate,
+and a future phase will connect them to a full proof of the execution itself.
+
+## What is "machine-checkable" now?
+
+- **Static verification**: input lineage, deterministic re-run, and risk
+  constraints are all independently checkable.
+- **Dimensional verification**: unit mismatches are caught at execution time and
+  surfaced in the certificate.
+- **Solver-ready encoding**: risk claims can be fed directly to SMT or Lean.
+
+A fully formal proof of the runner's correctness (and cryptographic signing of
+certificates) remains on the roadmap.
 
 ## Next steps
 
