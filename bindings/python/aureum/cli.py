@@ -9,9 +9,11 @@ from pathlib import Path
 import click
 
 from .adapter import AlpacaAdapter
+from .author import StrategyAuthor
 from .backtest import BacktestRunner, MarketData
 from .certificate import get_environment
 from .prover import Lean4Generator, SmtLibGenerator, extract_claims
+from .reflector import StrategyReflector
 from .strategy import Strategy
 
 
@@ -33,6 +35,105 @@ def validate(path: Path) -> None:
             print(f"  - {error}")
         raise click.Abort()
     print(f"Strategy '{strategy.metadata['name']}' is valid.")
+
+
+@cli.command()
+@click.argument("prompt")
+@click.option(
+    "--output",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Output strategy YAML path",
+)
+@click.option(
+    "--data",
+    type=click.Path(path_type=Path),
+    help="Data CSV for optional dry-run backtest",
+)
+@click.option("--dry-run", is_flag=True, help="Run a dry-run backtest and emit certificate")
+@click.option("--model", default="claude-sonnet-5", help="Anthropic model name")
+@click.option(
+    "--max-correction-attempts",
+    default=2,
+    show_default=True,
+    help="Max retries if the LLM emits invalid YAML",
+)
+def author(
+    prompt: str,
+    output: Path,
+    data: Path | None,
+    dry_run: bool,
+    model: str,
+    max_correction_attempts: int,
+) -> None:
+    """Generate an Aureum strategy YAML from a natural-language prompt."""
+    author_ = StrategyAuthor(model=model)
+    result = author_.write_strategy(
+        prompt,
+        output,
+        dry_run_data=data if dry_run else None,
+        max_correction_attempts=max_correction_attempts,
+    )
+    click.echo(f"Strategy written to {output.resolve()}")
+    if result.rationale:
+        click.echo(f"Rationale: {result.rationale}")
+    if result.certificate_path:
+        click.echo(f"Dry-run certificate: {result.certificate_path.resolve()}")
+
+
+@cli.command()
+@click.argument("strategy", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--data",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Data CSV for backtests",
+)
+@click.option(
+    "--certificate",
+    type=click.Path(path_type=Path),
+    help="Existing certificate JSON (if omitted, one is generated)",
+)
+@click.option(
+    "--output",
+    type=click.Path(path_type=Path),
+    help="Output strategy path (defaults to overwriting input)",
+)
+@click.option(
+    "--max-attempts",
+    default=3,
+    show_default=True,
+    help="Maximum reflection iterations",
+)
+@click.option("--model", default="claude-sonnet-5", help="Anthropic model name")
+def reflect(
+    strategy: Path,
+    data: Path,
+    certificate: Path | None,
+    output: Path | None,
+    max_attempts: int,
+    model: str,
+) -> None:
+    """Fix a failing strategy using an LLM reflection loop."""
+    reflector = StrategyReflector(model=model)
+    result = reflector.reflect(
+        strategy,
+        data,
+        certificate_path=certificate,
+        output_path=output,
+        max_attempts=max_attempts,
+    )
+    if result.success:
+        click.echo(
+            f"Reflection succeeded after {result.attempts} attempt(s). "
+            f"Accepted strategy: {result.accepted_draft}"
+        )
+    else:
+        click.echo(
+            f"Reflection failed after {result.attempts} attempt(s). "
+            f"Drafts preserved: {[str(d) for d in result.drafts]}"
+        )
+        raise click.Abort()
 
 
 @cli.command()

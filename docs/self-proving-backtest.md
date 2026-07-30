@@ -204,6 +204,40 @@ and a future phase will connect them to a full proof of the execution itself.
 A fully formal proof of the runner's correctness (and cryptographic signing of
 certificates) remains on the roadmap.
 
+## Phase 3: AI authoring and reflection
+
+### Generate strategies from natural language
+
+```bash
+export ANTHROPIC_API_KEY=...
+aureum author "Tech momentum strategy with 12-1 ranking, equal weights on top 20%, max drawdown 30%, max leverage 1.5" \
+  --output examples/strategies/ai_momentum.yaml \
+  --data examples/data/synthetic_prices.csv \
+  --dry-run
+```
+
+The `author` command sends the prompt to Claude, validates the generated YAML,
+and optionally runs a dry-run backtest before writing the file.
+
+### Autonomous reflection on failing strategies
+
+```bash
+aureum reflect examples/strategies/buggy_slippage.yaml \
+  --data examples/data/synthetic_prices.csv \
+  --certificate buggy.json \
+  --max-attempts 3
+```
+
+The `reflect` command reads the backtest certificate, identifies hard
+constraint failures and dimensional errors, asks Claude for a fix, and
+iterates. Each attempt is saved as a numbered draft (`strategy.001.yaml`,
+`strategy.002.yaml`, …). The original file is only overwritten once all hard
+constraints pass.
+
+This is the foundation for the future **Aureum Cloud** tier, where the same
+loop runs continuously on a portfolio of strategies and emails a model-risk
+report.
+
 ## Next steps
 
 - Read the [DSL reference](./dsl.md) to design your own strategies.

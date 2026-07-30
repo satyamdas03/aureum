@@ -109,6 +109,16 @@ aureum backtest examples/strategies/momentum.yaml \
   --data examples/data/synthetic_prices.csv \
   --certificate certificate.json \
   --smt risk.smt2 --lean risk.lean
+
+# Generate a strategy from a plain-English prompt
+export ANTHROPIC_API_KEY=...
+aureum author "Long-only tech momentum, top 20% by 12-1 month momentum, equal weights, max drawdown 30%" \
+  --output examples/strategies/ai_momentum.yaml
+
+# Fix a failing strategy with the reflection loop
+aureum reflect examples/strategies/buggy_slippage.yaml \
+  --data examples/data/synthetic_prices.csv \
+  --max-attempts 3
 ```
 
 ---
