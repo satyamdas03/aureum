@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -432,6 +433,18 @@ class Strategy:
                 errors.append(
                     f"spec.portfolio.training.{field} is required ({kind}) "
                     "when objective is differentiable_sharpe"
+                )
+
+        if "train_end" in training and "val_end" in training:
+            try:
+                train_end = dt.date.fromisoformat(training["train_end"])
+                val_end = dt.date.fromisoformat(training["val_end"])
+                if train_end >= val_end:
+                    errors.append("train_end must be strictly before val_end")
+            except ValueError:
+                errors.append(
+                    "spec.portfolio.training.train_end and val_end must be valid "
+                    "ISO dates (YYYY-MM-DD)"
                 )
 
     def to_dict(self) -> dict[str, Any]:

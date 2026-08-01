@@ -16,6 +16,7 @@ import yaml
 from .alpha import AlphaGrammar, AlphaMiner, safety_check
 from .backtest import BacktestRunner, MarketData
 from .certificate import get_environment, hash_file
+from .diffopt import DifferentiableSharpeOptimizer, _find_repo_root  # noqa: F401
 from .mpt import OptimizationInputs, build_efficient_frontier, estimate_covariance, estimate_mean_returns
 from .prover import Lean4Generator, SmtLibGenerator, extract_claims
 from .reflector import StrategyReflector
@@ -292,7 +293,11 @@ def backtest(
 
     market_data = MarketData.from_csv(data)
     runner = BacktestRunner(
-        strategy, market_data, data_source=data_source, initial_nav=1_000_000.0
+        strategy,
+        market_data,
+        data_source=data_source,
+        initial_nav=1_000_000.0,
+        strategy_path=path,
     )
 
     if certificate or bundle or smt or lean or graph_persistence in {"inline", "bundle"}:
@@ -345,6 +350,17 @@ def backtest(
         extra_files: list[tuple[Path, str]] = []
         if graph_path is not None and graph_path.exists():
             extra_files.append((graph_path, "certificate.graph.json"))
+
+        portfolio_spec = strategy.portfolio()
+        if (
+            portfolio_spec
+            and portfolio_spec.get("objective") == "differentiable_sharpe"
+        ):
+            repo_root = _find_repo_root(path)
+            arch_file = repo_root / portfolio_spec["model"]["architecture_file"]
+            extra_files.append((arch_file, "model_architecture.yaml"))
+            if runner._diffopt and runner._diffopt.weights_path:
+                extra_files.append((runner._diffopt.weights_path, "trained_weights.npz"))
 
         if bundle:
             _write_bundle(bundle, path, data, cert_json, extra_files=extra_files)

@@ -1,0 +1,52 @@
+apiVersion: aureum.io/v1alpha1
+kind: Strategy
+metadata:
+  name: diffopt-sharpe
+  description: |
+    Edge 6 MVP: a JAX-trained per-asset MLP that maximizes out-of-sample Sharpe,
+    then runs the standard Aureum backtest on the test split.  The trained weights,
+    model architecture, and train/val/test splits are all content-addressed in the
+    Aureum Backtest Certificate.
+spec:
+  universe:
+    source: sp500
+    filter:
+      sector: Technology
+      min_price: 5.0
+      min_adv20: 1_000_000
+
+  schedule:
+    rebalance: 1M
+    lookback: 252d
+
+  portfolio:
+    objective: differentiable_sharpe
+    lookback_days: 252
+    long_only: true
+    max_weight: 0.25
+    min_weight: 0.0
+    model:
+      architecture_file: examples/models/sharpe_mlp.yaml
+    training:
+      learning_rate: 0.001
+      epochs: 100
+      batch_size: 16
+      l2_penalty: 0.001
+      max_weight_penalty: 10.0
+      early_stopping_patience: 20
+      train_end: "2023-06-30"
+      val_end: "2023-12-31"
+
+  risk:
+    max_drawdown:
+      value: 0.30
+      hard: true
+    max_leverage:
+      value: 1.0
+      hard: true
+    max_turnover_annual:
+      value: 20.0
+      hard: false
+
+  execution:
+    slippage: 0.0005
