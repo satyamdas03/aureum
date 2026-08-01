@@ -9,8 +9,8 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![Rust](https://img.shields.io/badge/rust-1.80%2B-orange)](https://www.rust-lang.org/)
-[![Build](https://img.shields.io/badge/build-in%20progress-yellow)](https://github.com/satyamdas03/aureum/actions)
-[![Docs](https://img.shields.io/badge/docs-aureum.finance-coming%20soon-lightgrey)](https://github.com/satyamdas03/aureum)
+[![Tests](https://img.shields.io/badge/tests-160%2B%20passing-brightgreen)](https://github.com/satyamdas03/aureum/actions)
+[![Docs](https://img.shields.io/badge/docs-aureum.finance-in%20repo-lightgrey)](https://github.com/satyamdas03/aureum/tree/main/docs)
 
 </div>
 
@@ -202,6 +202,99 @@ slippage misconfiguration.
 
 Read the full tutorial in the [docs](./docs/self-proving-backtest.md).
 
+## 🧠 Phase 4 — Provable Portfolio Construction + Seven Revolutionary Edges
+
+Phase 4 turns the backtest certificate into a full portfolio-construction
+workbench.  The `spec.portfolio` block now supports classical MPT optimizers
+and six additional research-grade extensions, each with its own lineage fields
+in the certificate.
+
+| Edge | Objective / capability | Module | What the certificate records |
+|---|---|---|---|
+| **1** | Classical MPT: mean-variance, GMVP, max-Sharpe, risk-parity, min-CVaR | `aureum.mpt` | `PortfolioConstruction` with weights history and optimizer-inputs hash |
+| **2** | **Causal MPT** — condition covariance on declared latent drivers | `aureum.causal` | `causal_graph_hash`, `conditional_covariance_hash`, per-rebalance driver betas/R² |
+| **3** | **Conformal portfolios** — point forecasts replaced by conservative split-conformal prediction sets | `aureum.conformal` | `calibration_set_hash`, `coverage_level`, `prediction_set_width` |
+| **4** | **Neuro-symbolic alpha** — deterministic, auditable formulas from a whitelist grammar | `aureum.alpha` | `alpha_lineage` with formula, safety verdict, and generation provenance |
+| **5** | **Semantic knowledge graph** — content-addressed entities and typed relations across the investment process | `aureum.graph` | `graph_node_id`, `linked_entity_hashes`, `knowledge_graph` |
+| **6** | **Differentiable certifiable execution** — JAX/Optax learned Sharpe policy with full model lineage | `aureum.diffopt` | `model_architecture_hash`, `weights_hash`, `train_val_test_split_hashes` |
+| **7** | **Economic-security audit** — adversarial extractable-value analysis against front-running and liquidity squeezes | `aureum.econsec` | `economic_security` block + `economic_security_hash` in determinism |
+
+These edges are intentionally additive: you can combine `causal_graph` with a
+`conformalized_portfolio`, run a `differentiable_sharpe` policy, attach the
+knowledge graph, and add the economic-security audit in one backtest.  Every
+lineage hash makes the certificate reproducible and auditable.
+
+### Example: causal + conformal portfolio with graph persistence
+
+```yaml
+portfolio:
+  objective: conformalized_portfolio
+  base_objective: minimum_variance
+  covariance_estimator: ledoit_wolf
+  uncertainty:
+    method: conformal_split
+    coverage: 0.90
+    calibration_fraction: 0.20
+  causal_graph:
+    drivers:
+      - name: tech_factor
+    edges:
+      - from: tech_factor
+        to: [AAPL, MSFT, NVDA, GOOGL]
+  causal_separation:
+    mode: condition_on
+    drivers: [tech_factor]
+
+audit:
+  graph_persistence: inline
+  economic_security: true
+```
+
+### Example: neuro-symbolic alpha signal
+
+```yaml
+signals:
+  alpha:
+    type: neuro_symbolic
+    formula: if_else(gt(dollar_volume(close, volume, 20), 5_000_000.0), zscore(returns(close, 5), 63), 0.0)
+    generation:
+      llm_model: claude-sonnet-5
+      safety_checks_passed: true
+
+ranking:
+  by: alpha
+  ascending: false
+```
+
+### CLI for the new edges
+
+```bash
+# Efficient frontier for a portfolio block
+aureum frontier examples/strategies/mpt_minimum_variance.yaml
+
+# Backtest with causal + conformal + graph + audit
+aureum backtest examples/strategies/causal_conformal.yaml \
+  --data examples/data/synthetic_prices.csv \
+  --certificate cert.json \
+  --graph inline \
+  --economic-security
+
+# Generate a neuro-symbolic alpha from a prompt
+export ANTHROPIC_API_KEY=...
+aureum alpha "A liquid-aware short-term momentum alpha" \
+  --name momentum_reversal \
+  --output examples/strategies/alpha_momentum_reversal.yaml
+
+# Validate a formula without calling the LLM
+aureum alpha "sma(close, 20) / close" --validate-only
+
+# Backtest a learned JAX/Optax policy
+aureum backtest examples/strategies/diffopt_sharpe.yaml \
+  --data examples/data/synthetic_prices.csv \
+  --certificate diffopt.json \
+  --bundle diffopt-run.tar.gz
+```
+
 ## 🖥️ Aureum Studio (Web Dashboard)
 
 Aureum ships with a browser-based studio for interactive strategy authoring and
@@ -266,9 +359,10 @@ Aureum does not ask buyers to add a new budget line. It replaces the **semantic-
 | **0** | Repo, docs, and buildable skeleton | ✅ Done |
 | **1** | Self-proving backtest: DSL + deterministic runner + ABC certificate | ✅ Done |
 | **2** | Dimensional type enforcement + real data adapter + Lean/SMT verifier bridge | ✅ Done |
-| **3** | AI authoring + reflection loop | Planned |
-| **4** | Multi-user surfaces (indie, fund, fintech, DeFi) | Planned |
-| **5** | Public launch + community | Planned |
+| **3** | AI authoring + reflection loop | ✅ Done |
+| **4** | Provable MPT core + revolutionary edges (causal, conformal, neuro-symbolic alpha, semantic graph, diffopt, econsec) | ✅ Done |
+| **5** | Multi-user surfaces (indie, fund, fintech, DeFi) | Planned |
+| **6** | Public launch + community | Planned |
 
 ---
 
@@ -279,6 +373,16 @@ Aureum does not ask buyers to add a new budget line. It replaces the **semantic-
 ├── crates/aureum-core      # Rust execution engine (deterministic DAG, dimensional types, lineage)
 ├── crates/aureum-py        # PyO3 bindings for the Rust core
 ├── bindings/python         # Python package: `pip install aureum`
+│   ├── aureum/mpt.py       # Classical + robust MPT optimizers (Edge 1)
+│   ├── aureum/causal.py    # Driver DAG + conditioned covariance (Edge 2)
+│   ├── aureum/conformal.py # Split-conformal portfolio construction (Edge 3)
+│   ├── aureum/alpha.py     # Neuro-symbolic alpha DSL + safety gating (Edge 4)
+│   ├── aureum/graph.py     # Content-addressed semantic knowledge graph (Edge 5)
+│   ├── aureum/diffopt.py   # JAX/Optax learned Sharpe optimizer (Edge 6)
+│   ├── aureum/econsec.py   # Economic-security audit (Edge 7)
+│   ├── aureum/certificate.py # Self-proving backtest certificate
+│   ├── aureum/backtest.py  # Deterministic runner
+│   └── aureum/cli.py       # Command-line interface
 ├── frontend/web            # React/TypeScript web IDE and demo
 ├── docs                    # Documentation site (MkDocs)
 ├── examples/strategies     # Sample strategy DSLs
