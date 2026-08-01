@@ -19,6 +19,11 @@ from typing import Any
 
 import numpy as np
 
+from aureum.causal import (
+    CausalGraph,
+    CausalSeparationSpec,
+    condition_covariance,
+)
 from aureum.certificate import (
     BacktestCertificate,
     Environment,
@@ -532,6 +537,34 @@ class BacktestRunner:
         mu = estimate_mean_returns(returns_arr, method="sample")
         cov = estimate_covariance(returns_arr, estimator=covariance_estimator)
 
+        causal_meta: dict[str, object] | None = None
+        causal_graph_hash = ""
+        if portfolio_spec.get("causal_graph"):
+            graph = CausalGraph.from_portfolio_spec(portfolio_spec)
+            graph_errors = graph.validate(symbols)
+            if graph_errors:
+                return {}, {
+                    "objective": objective,
+                    "error": "causal graph validation failed",
+                    "causal_graph_errors": graph_errors,
+                    "eligible_count": len(symbols),
+                }
+            separation = CausalSeparationSpec.from_portfolio_spec(portfolio_spec)
+            if separation is None:
+                return {}, {
+                    "objective": objective,
+                    "error": "causal_graph requires causal_separation",
+                    "eligible_count": len(symbols),
+                }
+            cov, causal_meta = condition_covariance(
+                returns_arr, symbols, graph, separation
+            )
+            from aureum.certificate import _sha256_text, _stable_json
+
+            causal_graph_hash = _sha256_text(
+                _stable_json(portfolio_spec.get("causal_graph"))
+            )
+
         inputs = OptimizationInputs(
             expected_returns=mu,
             covariance=cov,
@@ -601,6 +634,10 @@ class BacktestRunner:
                 for symbol, weight in zip(symbols, result.weights)
             },
         }
+        if causal_meta is not None:
+            meta["causal"] = causal_meta
+        if causal_graph_hash:
+            meta["causal_graph_hash"] = causal_graph_hash
         return target_values, meta
 
     def _eligible_universe(
@@ -785,6 +822,7 @@ class BacktestRunner:
                     "weights": entry["portfolio"].get("weights", {}),
                     "expected_return": entry["portfolio"].get("expected_return"),
                     "risk": entry["portfolio"].get("risk"),
+                    "causal": entry["portfolio"].get("causal"),
                 }
                 for entry in result.rebalance_log
                 if "portfolio" in entry
@@ -808,8 +846,21 @@ class BacktestRunner:
                 "risk_free_rate": portfolio_spec.get("risk_free_rate", 0.0),
                 "lookback_days": portfolio_spec.get("lookback_days", 252),
                 "constraints": constraints,
+                "causal_graph": portfolio_spec.get("causal_graph"),
+                "causal_separation": portfolio_spec.get("causal_separation"),
             }
             from aureum.certificate import _sha256_text, _stable_json
+
+            conditional_covariance_hash = ""
+            for entry in reversed(weights_history):
+                causal = (entry.get("causal") or {}) if isinstance(entry, dict) else {}
+                h = causal.get("conditional_covariance_hash", "")
+                if h:
+                    conditional_covariance_hash = h
+                    break
+            causal_graph_hash = _sha256_text(
+                _stable_json(portfolio_spec.get("causal_graph"))
+            ) if portfolio_spec.get("causal_graph") else ""
 
             portfolio_construction = PortfolioConstruction(
                 objective=portfolio_spec["objective"],
@@ -819,6 +870,8 @@ class BacktestRunner:
                 constraints=constraints,
                 weights_history=weights_history,
                 optimization_inputs_hash=_sha256_text(_stable_json(config_for_hash)),
+                causal_graph_hash=causal_graph_hash,
+                conditional_covariance_hash=conditional_covariance_hash,
             )
 
         return BacktestCertificate.from_run(

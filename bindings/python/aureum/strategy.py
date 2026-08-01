@@ -8,6 +8,8 @@ from typing import Any
 
 import yaml
 
+from aureum.causal import CausalGraph, CausalSeparationSpec
+
 
 @dataclass
 class Strategy:
@@ -47,12 +49,17 @@ class Strategy:
             "maximum_sharpe",
             "risk_parity",
             "minimum_cvar",
+            "differentiable_sharpe",
         }:
             errors.append(
                 f"spec.portfolio.objective '{objective}' is not supported; "
                 "supported values: mean_variance, minimum_variance, maximum_sharpe, "
-                "risk_parity, minimum_cvar"
+                "risk_parity, minimum_cvar, differentiable_sharpe"
             )
+
+        if objective == "differentiable_sharpe":
+            self._validate_differentiable_sharpe(portfolio, errors)
+
         estimator = portfolio.get("covariance_estimator", "sample")
         if estimator not in {"sample", "ledoit_wolf"}:
             errors.append(
@@ -77,6 +84,48 @@ class Strategy:
             and min_weight > max_weight
         ):
             errors.append("spec.portfolio.min_weight cannot exceed max_weight")
+
+        self._validate_causal(portfolio, errors)
+
+    def _validate_causal(
+        self, portfolio: dict[str, Any], errors: list[str]
+    ) -> None:
+        """Validate the optional ``causal_graph`` / ``causal_separation`` block."""
+        has_graph = bool(portfolio.get("causal_graph"))
+        separation = CausalSeparationSpec.from_portfolio_spec(portfolio)
+
+        if separation is not None and not has_graph:
+            errors.append(
+                "spec.portfolio.causal_separation requires spec.portfolio.causal_graph"
+            )
+            return
+
+        if not has_graph:
+            return
+
+        graph = CausalGraph.from_portfolio_spec(portfolio)
+        symbols = self.spec.get("universe", {}).get("symbols", [])
+        errors.extend(graph.validate(symbols))
+
+        if separation is None:
+            errors.append(
+                "spec.portfolio.causal_graph requires spec.portfolio.causal_separation"
+            )
+            return
+
+        if separation.mode not in {"condition_on", "auto"}:
+            errors.append(
+                f"spec.portfolio.causal_separation.mode '{separation.mode}' is not supported; "
+                "supported values: condition_on, auto"
+            )
+
+        if separation.mode == "condition_on":
+            unknown = set(separation.drivers) - set(graph.driver_names())
+            if unknown:
+                errors.append(
+                    "undeclared driver in causal_separation: "
+                    f"{sorted(unknown)}"
+                )
 
     def validate(self) -> list[str]:
         """Return a list of validation errors, empty if valid."""
@@ -166,7 +215,65 @@ class Strategy:
                     "hard": True,
                 }
             )
+            if portfolio.get("causal_graph"):
+                separation = CausalSeparationSpec.from_portfolio_spec(portfolio)
+                out.append(
+                    {
+                        "name": "causal_separation_mode",
+                        "variable": "causal_separation_mode",
+                        "operator": "==",
+                        "limit": separation.mode if separation else "",
+                        "hard": False,
+                    }
+                )
+                out.append(
+                    {
+                        "name": "causal_separation_drivers",
+                        "variable": "causal_separation_drivers",
+                        "operator": "==",
+                        "limit": separation.drivers if separation else [],
+                        "hard": False,
+                    }
+                )
         return out
+
+    def _validate_differentiable_sharpe(
+        self, portfolio: dict[str, Any], errors: list[str]
+    ) -> None:
+        """Validate the ``spec.portfolio`` block when objective is differentiable_sharpe."""
+        model = portfolio.get("model")
+        if not isinstance(model, dict):
+            errors.append(
+                "spec.portfolio.model is required when objective is differentiable_sharpe"
+            )
+            return
+
+        architecture_file = model.get("architecture_file")
+        if not architecture_file:
+            errors.append(
+                "spec.portfolio.model.architecture_file is required "
+                "when objective is differentiable_sharpe"
+            )
+
+        training = portfolio.get("training")
+        if not isinstance(training, dict):
+            errors.append(
+                "spec.portfolio.training is required when objective is differentiable_sharpe"
+            )
+            return
+
+        required_fields = {
+            "learning_rate": "float",
+            "epochs": "int",
+            "train_end": "date (YYYY-MM-DD)",
+            "val_end": "date (YYYY-MM-DD)",
+        }
+        for field, kind in required_fields.items():
+            if field not in training:
+                errors.append(
+                    f"spec.portfolio.training.{field} is required ({kind}) "
+                    "when objective is differentiable_sharpe"
+                )
 
     def to_dict(self) -> dict[str, Any]:
         return {

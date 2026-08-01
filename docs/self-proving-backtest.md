@@ -245,3 +245,20 @@ report.
   engine and verifier bridge.
 - Open an issue on [GitHub](https://github.com/satyamdas03/aureum) if you want a
   specific risk constraint or data adapter supported.
+
+
+## Causal MPT lineage
+
+When a strategy declares a ``causal_graph`` and ``causal_separation``, the
+backtest runner conditions the asset covariance matrix on the selected latent
+drivers before optimization.  The certificate records this separation step:
+
+- ``portfolio_construction.causal_graph_hash`` — SHA-256 of the declared graph.
+- ``portfolio_construction.conditional_covariance_hash`` — SHA-256 of the
+  conditional covariance used at the most recent rebalance.
+- Each rebalance log entry includes a ``causal`` object with the selected
+  drivers, per-driver aggregate R², per-asset betas, and the conditional
+  covariance hash.
+
+Because the causal graph is part of ``optimization_inputs_hash``, changing the
+declared drivers or separation mode produces a different reproducibility hash.
