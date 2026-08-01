@@ -85,6 +85,33 @@ signals:
     type: return
 ```
 
+## Neuro-symbolic alpha formulas (Edge 4)
+
+Aureum supports deterministic, neuro-symbolic alpha formulas written in a
+whitelist Lisp-style grammar.  Formulas are parsed into an auditable AST,
+run through a built-in safety checker, and evaluated over OHLCV bars.
+
+```yaml
+signals:
+  alpha:
+    type: neuro_symbolic
+    formula: if_else(gt(dollar_volume(close, volume, 20), 5_000_000.0), zscore(returns(close, 5), 63), 0.0)
+    generation:
+      llm_model: claude-sonnet-5
+      prompt: A liquid-aware short-term momentum alpha
+      safety_checks_passed: true
+
+ranking:
+  by: alpha
+  ascending: false
+```
+
+Supported primitives include `close`, `volume`, `returns`, `lag`, `sma`,
+`ema`, `volatility`, `momentum`, `zscore`, `rsi`, `ts_argmax`, `ts_argmin`,
+`dollar_volume`, `vwma`, arithmetic operators, comparisons, and `if_else`.
+The safety checker rejects unknown functions, look-ahead (negative lags),
+ stochastic primitives, and structural constants such as literal prices.
+
 ## Risk
 
 Risk constraints can be hard (must be provable) or soft (monitored).

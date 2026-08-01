@@ -221,6 +221,20 @@ class PortfolioConstruction:
 
 
 @dataclass
+class AlphaLineage:
+    """Lineage for neuro-symbolic alpha signals used in a backtest."""
+
+    alpha_signals: list[dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"alpha_signals": self.alpha_signals}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AlphaLineage":
+        return cls(alpha_signals=data.get("alpha_signals", []))
+
+
+@dataclass
 class BacktestCertificate:
     """Structured, machine-checkable audit artifact for a single backtest run."""
 
@@ -239,6 +253,7 @@ class BacktestCertificate:
     graph_node_id: str | None = None
     linked_entity_hashes: list[str] = field(default_factory=list)
     knowledge_graph: KnowledgeGraph | None = None
+    alpha_lineage: AlphaLineage | None = None
 
     @classmethod
     def from_run(
@@ -254,6 +269,7 @@ class BacktestCertificate:
         graph_node_id: str | None = None,
         linked_entity_hashes: list[str] | None = None,
         knowledge_graph: KnowledgeGraph | None = None,
+        alpha_lineage: AlphaLineage | None = None,
     ) -> BacktestCertificate:
         """Build a certificate from the raw parts of a backtest run."""
         input_hash = _sha256_text(_stable_json(inputs.to_dict()))
@@ -275,6 +291,7 @@ class BacktestCertificate:
             graph_node_id=graph_node_id,
             linked_entity_hashes=list(linked_entity_hashes) if linked_entity_hashes else [],
             knowledge_graph=knowledge_graph,
+            alpha_lineage=alpha_lineage,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -298,6 +315,8 @@ class BacktestCertificate:
             out["linked_entity_hashes"] = self.linked_entity_hashes
         if self.knowledge_graph is not None:
             out["knowledge_graph"] = self.knowledge_graph.to_dict()
+        if self.alpha_lineage is not None:
+            out["alpha_lineage"] = self.alpha_lineage.to_dict()
         return out
 
     def to_json(self, indent: int = 2) -> str:
@@ -389,6 +408,9 @@ class BacktestCertificate:
             graph_node_id=data.get("graph_node_id"),
             linked_entity_hashes=list(data.get("linked_entity_hashes", [])),
             knowledge_graph=knowledge_graph,
+            alpha_lineage=AlphaLineage.from_dict(data["alpha_lineage"])
+            if "alpha_lineage" in data
+            else None,
         )
 
     def with_draft_lineage(self, draft_lineage: dict[str, Any]) -> "BacktestCertificate":

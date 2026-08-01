@@ -19,12 +19,14 @@ from typing import Any
 
 import numpy as np
 
+from aureum.alpha import AlphaGrammar, safety_check
 from aureum.causal import (
     CausalGraph,
     CausalSeparationSpec,
     condition_covariance,
 )
 from aureum.certificate import (
+    AlphaLineage,
     BacktestCertificate,
     Environment,
     ExecutionSummary,
@@ -139,11 +141,13 @@ def _mean_reversion_5_20(closes: list[float]) -> float:
 
 
 # Registry of named signals referenced by ``spec.ranking.by``.
-_SIGNALS: dict[str, Callable[[list[float]], float]] = {
-    "momentum_12_1": _momentum_12_1,
-    "volatility_20d": _volatility_20d,
-    "sharpe_63d": _sharpe_63d,
-    "mean_reversion_5_20": _mean_reversion_5_20,
+# Every signal function receives the price history *and* volume history up to the
+# current bar so neuro-symbolic alphas can use both close and volume primitives.
+_SIGNALS: dict[str, Callable[[list[float], list[int]], float]] = {
+    "momentum_12_1": lambda closes, _volumes: _momentum_12_1(closes),
+    "volatility_20d": lambda closes, _volumes: _volatility_20d(closes),
+    "sharpe_63d": lambda closes, _volumes: _sharpe_63d(closes),
+    "mean_reversion_5_20": lambda closes, _volumes: _mean_reversion_5_20(closes),
 }
 
 
@@ -212,6 +216,15 @@ class MarketData:
         for rec in self._by_symbol.get(symbol, []):
             if rec["date"] <= date:
                 out.append(rec["close"])
+            else:
+                break
+        return out
+
+    def volumes_up_to(self, date: dt.date, symbol: str) -> list[int]:
+        out = []
+        for rec in self._by_symbol.get(symbol, []):
+            if rec["date"] <= date:
+                out.append(rec["volume"])
             else:
                 break
         return out
@@ -293,6 +306,52 @@ class BacktestRunner:
         self.data_source = data_source
         self.initial_nav = initial_nav
 
+    def _build_signal_registry(
+        self,
+    ) -> dict[str, Callable[[list[float], list[int]], float]]:
+        """Build a per-runner signal registry from built-ins and formula signals."""
+
+        def _make_evaluator(node: Any) -> Callable[[list[float], list[int]], float]:
+            def _eval(closes: list[float], volumes: list[int]) -> float:
+                return float(node.evaluate(closes, volumes)[-1])
+
+            return _eval
+
+        registry = dict(_SIGNALS)
+        signals = self.strategy.spec.get("signals", {})
+        if isinstance(signals, dict):
+            for name, signal in signals.items():
+                if signal.get("type") != "neuro_symbolic":
+                    continue
+                formula = signal.get("formula", "")
+                ast, parse_error = AlphaGrammar.parse(formula)
+                if parse_error or ast is None:
+                    raise ValueError(f"signal '{name}' formula parse error: {parse_error}")
+                report = safety_check(ast, formula=formula)
+                if not report.safe:
+                    raise ValueError(
+                        f"signal '{name}' failed safety checks: {report.failures}"
+                    )
+                registry[name] = _make_evaluator(ast)
+        return registry
+
+    def _build_alpha_lineage(self) -> AlphaLineage | None:
+        """Capture alpha lineage for neuro-symbolic signals."""
+        signals = self.strategy.spec.get("signals", {})
+        alpha_signals: list[dict[str, Any]] = []
+        if isinstance(signals, dict):
+            for name, signal in signals.items():
+                if signal.get("type") != "neuro_symbolic":
+                    continue
+                alpha_signals.append(
+                    {
+                        "name": name,
+                        "formula": signal.get("formula", ""),
+                        "generation": signal.get("generation", {}),
+                    }
+                )
+        return AlphaLineage(alpha_signals=alpha_signals) if alpha_signals else None
+
     def run(self) -> BacktestResult:
         spec = self.strategy.spec
         universe = spec["universe"]
@@ -300,6 +359,7 @@ class BacktestRunner:
         slippage = execution.get("slippage", 0.0)
 
         portfolio_spec = self.strategy.portfolio()
+        signal_registry = self._build_signal_registry()
 
         if portfolio_spec is None:
             ranking = spec["ranking"]
@@ -307,7 +367,7 @@ class BacktestRunner:
             signal_name = ranking["by"]
             ascending = ranking.get("ascending", False)
             top_n = weights.get("top_n", 1.0)
-            signal_fn = _SIGNALS.get(signal_name)
+            signal_fn = signal_registry.get(signal_name)
             if signal_fn is None:
                 raise ValueError(f"unknown signal: {signal_name!r}")
         else:
@@ -362,7 +422,10 @@ class BacktestRunner:
                     scores = {}
                     for symbol in candidates:
                         closes = self.data.closes_up_to(date, symbol)
-                        score = signal_fn(closes)  # type: ignore[misc]
+                        volumes = self.data.volumes_up_to(date, symbol)
+                        if signal_fn is None:
+                            continue
+                        score = signal_fn(closes, volumes)
                         if not math.isnan(score):
                             scores[symbol] = score
 
@@ -983,6 +1046,9 @@ class BacktestRunner:
                     "mean_prediction_set_width", 0.0
                 )
 
+        # Edge 4: capture neuro-symbolic alpha signal lineage.
+        alpha_lineage = self._build_alpha_lineage()
+
         return BacktestCertificate.from_run(
             environment=environment,
             inputs=inputs,
@@ -994,6 +1060,7 @@ class BacktestRunner:
             graph_node_id=graph_node_id,
             linked_entity_hashes=linked_entity_hashes,
             knowledge_graph=knowledge_graph,
+            alpha_lineage=alpha_lineage,
         )
 
     def _build_knowledge_graph(
