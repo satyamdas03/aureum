@@ -1,0 +1,57 @@
+# Example Aureum portfolio strategy using Modern Portfolio Theory.
+# This strategy rebalances monthly into the long-only tangency portfolio
+# (maximum Sharpe ratio) over the eligible universe, using Ledoit-Wolf
+# shrinkage for covariance estimation.
+
+apiVersion: aureum.io/v1alpha1
+kind: Strategy
+metadata:
+  name: mpt-max-sharpe-tech
+  description: |
+    Long-only maximum-Sharpe portfolio of US tech stocks, rebalanced monthly,
+    with Ledoit-Wolf covariance shrinkage and a 35% single-name cap.
+  tags: [mpt, mean-variance, tech, max-sharpe]
+
+spec:
+  universe:
+    source: sp500
+    filter:
+      sector: Technology
+      min_price: 5.00
+      min_adv20: 1_000_000
+
+  schedule:
+    rebalance: 1M
+    lookback: 252d
+
+  portfolio:
+    objective: maximum_sharpe
+    risk_measure: variance
+    covariance_estimator: ledoit_wolf
+    risk_free_rate: 0.045
+    lookback_days: 252
+    long_only: true
+    max_weight: 0.35
+    min_weight: 0.0
+
+  risk:
+    max_drawdown:
+      value: 0.30
+      hard: true
+    max_leverage:
+      value: 1.00
+      hard: true
+    max_turnover_annual:
+      value: 20.00
+      hard: false
+    max_concentration_single_name:
+      value: 0.35
+      hard: true
+
+  execution:
+    open: market_on_open
+    slippage: 0.0005
+
+  audit:
+    lineage: full
+    deterministic: true

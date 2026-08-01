@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import tarfile
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from .adapter import AlpacaAdapter
 from .author import StrategyAuthor
 from .backtest import BacktestRunner, MarketData
 from .certificate import get_environment
+from .mpt import OptimizationInputs, build_efficient_frontier, estimate_covariance, estimate_mean_returns
 from .prover import Lean4Generator, SmtLibGenerator, extract_claims
 from .reflector import StrategyReflector
 from .strategy import Strategy
@@ -245,6 +247,81 @@ def backtest(
                 raise click.Abort()
         elif not certificate:
             click.echo(report_json)
+
+
+@cli.command()
+@click.argument("strategy", type=click.Path(exists=True, path_type=Path))
+@click.option("--data", required=True, type=click.Path(exists=True, path_type=Path), help="Price CSV")
+@click.option("--output", type=click.Path(path_type=Path), help="Output frontier JSON")
+@click.option("--n-points", default=20, show_default=True, help="Number of frontier points")
+def frontier(strategy: Path, data: Path, output: Path | None, n_points: int) -> None:
+    """Compute the mean-variance efficient frontier for a portfolio strategy."""
+    strat = Strategy.from_file(strategy)
+    errors = strat.validate()
+    if errors:
+        click.echo("Validation failed:")
+        for error in errors:
+            click.echo(f"  - {error}")
+        raise click.Abort()
+
+    portfolio_spec = strat.portfolio()
+    if portfolio_spec is None:
+        click.echo("Error: frontier requires a strategy with spec.portfolio")
+        raise click.Abort()
+
+    market_data = MarketData.from_csv(data)
+    lookback_days = int(portfolio_spec.get("lookback_days", 252))
+
+    symbols = [s for s in market_data.symbols]
+    returns_matrix: list[list[float]] = []
+    valid_symbols: list[str] = []
+    for symbol in symbols:
+        closes = market_data.closes(symbol)
+        if len(closes) < lookback_days + 1:
+            continue
+        window = closes[-(lookback_days + 1) :]
+        rets = [window[i] / window[i - 1] - 1.0 for i in range(1, len(window))]
+        if any(not math.isfinite(r) for r in rets):
+            continue
+        valid_symbols.append(symbol)
+        returns_matrix.append(rets)
+
+    if len(valid_symbols) < 2:
+        click.echo("Error: fewer than 2 assets have enough history for the frontier")
+        raise click.Abort()
+
+    np = __import__("numpy")
+    returns_arr = np.array(returns_matrix).T
+    mu = estimate_mean_returns(returns_arr, method="sample")
+    cov = estimate_covariance(returns_arr, estimator=portfolio_spec.get("covariance_estimator", "sample"))
+    inputs = OptimizationInputs(
+        expected_returns=mu,
+        covariance=cov,
+        risk_free_rate=float(portfolio_spec.get("risk_free_rate", 0.0)),
+    )
+
+    frontier_points = build_efficient_frontier(
+        inputs,
+        n_points=n_points,
+        long_only=portfolio_spec.get("long_only", True),
+        max_weight=portfolio_spec.get("max_weight"),
+        min_weight=portfolio_spec.get("min_weight"),
+    )
+
+    out = {
+        "strategy": strat.metadata.get("name"),
+        "objective": portfolio_spec.get("objective"),
+        "covariance_estimator": portfolio_spec.get("covariance_estimator", "sample"),
+        "lookback_days": lookback_days,
+        "symbols": valid_symbols,
+        "frontier": frontier_points,
+    }
+    out_json = json.dumps(out, indent=2)
+    if output:
+        output.write_text(out_json, encoding="utf-8")
+        click.echo(f"Frontier written to {output.resolve()}")
+    else:
+        click.echo(out_json)
 
 
 @cli.command()

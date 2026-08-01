@@ -17,12 +17,24 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from aureum.certificate import (
     BacktestCertificate,
     Environment,
     InputLineage,
     Inputs,
     hash_file,
+)
+from aureum.mpt import (
+    OptimizationInputs,
+    estimate_covariance,
+    estimate_mean_returns,
+    optimize_maximum_sharpe,
+    optimize_mean_variance,
+    optimize_minimum_variance,
+    optimize_min_cvar,
+    optimize_risk_parity,
 )
 from aureum.quantity import (
     DOLLARS,
@@ -273,19 +285,25 @@ class BacktestRunner:
 
     def run(self) -> BacktestResult:
         spec = self.strategy.spec
-        ranking = spec["ranking"]
-        weights = spec["weights"]
         universe = spec["universe"]
         execution = spec["execution"]
-
-        signal_name = ranking["by"]
-        ascending = ranking.get("ascending", False)
-        top_n = weights.get("top_n", 1.0)
         slippage = execution.get("slippage", 0.0)
 
-        signal_fn = _SIGNALS.get(signal_name)
-        if signal_fn is None:
-            raise ValueError(f"unknown signal: {signal_name!r}")
+        portfolio_spec = self.strategy.portfolio()
+
+        if portfolio_spec is None:
+            ranking = spec["ranking"]
+            weights = spec["weights"]
+            signal_name = ranking["by"]
+            ascending = ranking.get("ascending", False)
+            top_n = weights.get("top_n", 1.0)
+            signal_fn = _SIGNALS.get(signal_name)
+            if signal_fn is None:
+                raise ValueError(f"unknown signal: {signal_name!r}")
+        else:
+            signal_fn = None
+            ascending = False
+            top_n = 1.0
 
         positions: dict[str, Quantity] = {}
         cash = Quantity(self.initial_nav, Unit.base(USD), "initial_nav")
@@ -323,24 +341,33 @@ class BacktestRunner:
 
             if date in rebalance_dates:
                 candidates = self._eligible_universe(date, universe)
-                scores: dict[str, float] = {}
-                for symbol in candidates:
-                    closes = self.data.closes_up_to(date, symbol)
-                    score = signal_fn(closes)
-                    if not math.isnan(score):
-                        scores[symbol] = score
 
-                if not scores:
-                    continue
+                if portfolio_spec is not None:
+                    target_values, portfolio_meta = self._portfolio_target_values(
+                        date, candidates, nav, portfolio_spec
+                    )
+                    selected = sorted(target_values.keys())
+                    scores: dict[str, float] = {}
+                else:
+                    scores = {}
+                    for symbol in candidates:
+                        closes = self.data.closes_up_to(date, symbol)
+                        score = signal_fn(closes)  # type: ignore[misc]
+                        if not math.isnan(score):
+                            scores[symbol] = score
 
-                ranked = sorted(
-                    scores.items(), key=lambda item: item[1], reverse=not ascending
-                )
-                select_count = max(1, round(len(ranked) * top_n))
-                selected = [symbol for symbol, _ in ranked[:select_count]]
+                    if not scores:
+                        continue
 
-                target_weight = 1.0 / len(selected)
-                target_values = {s: nav * target_weight for s in selected}
+                    ranked = sorted(
+                        scores.items(), key=lambda item: item[1], reverse=not ascending
+                    )
+                    select_count = max(1, round(len(ranked) * top_n))
+                    selected = [symbol for symbol, _ in ranked[:select_count]]
+
+                    target_weight = 1.0 / len(selected)
+                    target_values = {s: nav * target_weight for s in selected}
+                    portfolio_meta = None
 
                 new_positions: dict[str, Quantity] = {}
                 new_cash = cash
@@ -399,14 +426,16 @@ class BacktestRunner:
                 cash = new_cash
                 cumulative_turnover += turnover_notional / nav if nav > 0 else 0.0
 
-                rebalance_log.append(
-                    {
-                        "date": date.isoformat(),
-                        "selected": selected,
-                        "scores": {s: round(scores[s], 6) for s in selected},
-                        "nav": round(nav, 4),
-                    }
-                )
+                log_entry: dict[str, Any] = {
+                    "date": date.isoformat(),
+                    "selected": selected,
+                    "nav": round(nav, 4),
+                }
+                if scores:
+                    log_entry["scores"] = {s: round(scores[s], 6) for s in selected}
+                if portfolio_meta is not None:
+                    log_entry["portfolio"] = portfolio_meta
+                rebalance_log.append(log_entry)
 
         final_nav = daily_nav[-1]["nav"] if daily_nav else self.initial_nav
         total_return = final_nav / self.initial_nav - 1.0
@@ -459,6 +488,120 @@ class BacktestRunner:
                 rebalance_dates.add(date)
                 prev_month = month_key
         return rebalance_dates
+
+    def _portfolio_target_values(
+        self,
+        date: dt.date,
+        candidates: list[str],
+        nav: float,
+        portfolio_spec: dict[str, Any],
+    ) -> tuple[dict[str, float], dict[str, Any]]:
+        """Run an MPT optimizer and return dollar target values for each asset."""
+        lookback_days = int(portfolio_spec.get("lookback_days", 252))
+        objective = portfolio_spec["objective"]
+        covariance_estimator = portfolio_spec.get("covariance_estimator", "sample")
+        risk_measure = portfolio_spec.get("risk_measure", "variance")
+        risk_free_rate = float(portfolio_spec.get("risk_free_rate", 0.0))
+        long_only = portfolio_spec.get("long_only", True)
+        max_weight = portfolio_spec.get("max_weight")
+        min_weight = portfolio_spec.get("min_weight")
+
+        # Gather returns for candidates that have enough history.
+        symbols: list[str] = []
+        return_matrix: list[list[float]] = []
+        for symbol in candidates:
+            closes = self.data.closes_up_to(date, symbol)
+            if len(closes) < lookback_days + 1:
+                continue
+            window = closes[-(lookback_days + 1) :]
+            rets = [window[i] / window[i - 1] - 1.0 for i in range(1, len(window))]
+            if any(math.isnan(r) or math.isinf(r) for r in rets):
+                continue
+            symbols.append(symbol)
+            return_matrix.append(rets)
+
+        if len(symbols) < 2:
+            # Not enough assets to optimize; hold cash.
+            return {}, {
+                "objective": objective,
+                "error": "insufficient assets with required lookback",
+                "eligible_count": len(symbols),
+            }
+
+        returns_arr = np.array(return_matrix).T
+        mu = estimate_mean_returns(returns_arr, method="sample")
+        cov = estimate_covariance(returns_arr, estimator=covariance_estimator)
+
+        inputs = OptimizationInputs(
+            expected_returns=mu,
+            covariance=cov,
+            risk_free_rate=risk_free_rate,
+        )
+
+        if objective == "mean_variance":
+            target_return = portfolio_spec.get("target_return")
+            target_risk = portfolio_spec.get("target_risk")
+            result = optimize_mean_variance(
+                inputs,
+                target_return=target_return,
+                target_risk=target_risk,
+                long_only=long_only,
+                max_weight=max_weight,
+                min_weight=min_weight,
+            )
+        elif objective == "minimum_variance":
+            result = optimize_minimum_variance(
+                inputs,
+                long_only=long_only,
+                max_weight=max_weight,
+                min_weight=min_weight,
+            )
+        elif objective == "maximum_sharpe":
+            result = optimize_maximum_sharpe(
+                inputs,
+                long_only=long_only,
+                max_weight=max_weight,
+                min_weight=min_weight,
+            )
+        elif objective == "risk_parity":
+            result = optimize_risk_parity(
+                inputs,
+                long_only=long_only,
+                max_weight=max_weight,
+                min_weight=min_weight,
+            )
+        elif objective == "minimum_cvar":
+            alpha = 0.95 if risk_measure == "cvar_95" else 0.99
+            result = optimize_min_cvar(
+                inputs,
+                alpha=alpha,
+                long_only=long_only,
+                max_weight=max_weight,
+                min_weight=min_weight,
+                scenarios=returns_arr,
+            )
+        else:
+            raise ValueError(f"unsupported portfolio objective: {objective!r}")
+
+        target_values = {
+            symbol: nav * float(weight)
+            for symbol, weight in zip(symbols, result.weights)
+            if weight > 1e-12
+        }
+        meta = {
+            "objective": objective,
+            "risk_measure": result.risk_measure,
+            "expected_return": round(result.expected_return, 8),
+            "risk": round(result.risk, 8),
+            "covariance_estimator": covariance_estimator,
+            "lookback_days": lookback_days,
+            "eligible_count": len(symbols),
+            "weights": {
+                symbol: round(float(weight), 6)
+                for symbol, weight in zip(symbols, result.weights)
+            },
+        }
+        return target_values, meta
 
     def _eligible_universe(
         self, date: dt.date, universe_spec: dict[str, Any]
@@ -574,6 +717,7 @@ class BacktestRunner:
         """Run the backtest and wrap the result in an Aureum Backtest Certificate."""
         from aureum.certificate import (
             ExecutionSummary,
+            PortfolioConstruction,
             Results,
         )
 
@@ -632,6 +776,51 @@ class BacktestRunner:
             "rebalance_log": result.rebalance_log,
         }
 
+        portfolio_construction: PortfolioConstruction | None = None
+        portfolio_spec = self.strategy.portfolio()
+        if portfolio_spec:
+            weights_history = [
+                {
+                    "date": entry["date"],
+                    "weights": entry["portfolio"].get("weights", {}),
+                    "expected_return": entry["portfolio"].get("expected_return"),
+                    "risk": entry["portfolio"].get("risk"),
+                }
+                for entry in result.rebalance_log
+                if "portfolio" in entry
+            ]
+            constraints = {
+                k: v
+                for k, v in portfolio_spec.items()
+                if k
+                not in {
+                    "objective",
+                    "risk_measure",
+                    "covariance_estimator",
+                    "risk_free_rate",
+                    "lookback_days",
+                }
+            }
+            config_for_hash = {
+                "objective": portfolio_spec.get("objective"),
+                "risk_measure": portfolio_spec.get("risk_measure", "variance"),
+                "covariance_estimator": portfolio_spec.get("covariance_estimator", "sample"),
+                "risk_free_rate": portfolio_spec.get("risk_free_rate", 0.0),
+                "lookback_days": portfolio_spec.get("lookback_days", 252),
+                "constraints": constraints,
+            }
+            from aureum.certificate import _sha256_text, _stable_json
+
+            portfolio_construction = PortfolioConstruction(
+                objective=portfolio_spec["objective"],
+                risk_measure=portfolio_spec.get("risk_measure", "variance"),
+                covariance_estimator=portfolio_spec.get("covariance_estimator", "sample"),
+                risk_free_rate=float(portfolio_spec.get("risk_free_rate", 0.0)),
+                constraints=constraints,
+                weights_history=weights_history,
+                optimization_inputs_hash=_sha256_text(_stable_json(config_for_hash)),
+            )
+
         return BacktestCertificate.from_run(
             environment=environment,
             inputs=inputs,
@@ -639,4 +828,5 @@ class BacktestRunner:
             results=results,
             risk_constraints=risk_results,
             execution_trace=execution_trace,
+            portfolio_construction=portfolio_construction,
         )

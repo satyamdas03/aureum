@@ -160,6 +160,41 @@ class Determinism:
 
 
 @dataclass
+class PortfolioConstruction:
+    """Proof/evidence that a portfolio was built by a declared MPT optimizer.
+
+    In Edge 1 this records the declared optimizer, its configuration, and the
+    realized weights at each rebalance.  The ``frontier_hash`` field is reserved
+    for a future hash of the full efficient frontier used to select the
+    portfolio; it may be empty in this release.
+    """
+
+    objective: str
+    risk_measure: str
+    covariance_estimator: str
+    risk_free_rate: float
+    constraints: dict[str, Any]
+    weights_history: list[dict[str, Any]]
+    frontier_hash: str = ""
+    optimization_inputs_hash: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        out = {
+            "objective": self.objective,
+            "risk_measure": self.risk_measure,
+            "covariance_estimator": self.covariance_estimator,
+            "risk_free_rate": self.risk_free_rate,
+            "constraints": self.constraints,
+            "weights_history": self.weights_history,
+        }
+        if self.frontier_hash:
+            out["frontier_hash"] = self.frontier_hash
+        if self.optimization_inputs_hash:
+            out["optimization_inputs_hash"] = self.optimization_inputs_hash
+        return out
+
+
+@dataclass
 class BacktestCertificate:
     """Structured, machine-checkable audit artifact for a single backtest run."""
 
@@ -173,6 +208,7 @@ class BacktestCertificate:
     risk_constraints: list[dict[str, Any]]
     execution_trace: dict[str, Any]
     determinism: Determinism
+    portfolio_construction: PortfolioConstruction | None = None
 
     @classmethod
     def from_run(
@@ -184,6 +220,7 @@ class BacktestCertificate:
         results: Results,
         risk_constraints: list[dict[str, Any]],
         execution_trace: dict[str, Any],
+        portfolio_construction: PortfolioConstruction | None = None,
     ) -> BacktestCertificate:
         """Build a certificate from the raw parts of a backtest run."""
         input_hash = _sha256_text(_stable_json(inputs.to_dict()))
@@ -201,10 +238,11 @@ class BacktestCertificate:
             risk_constraints=risk_constraints,
             execution_trace=execution_trace,
             determinism=Determinism(input_hash=input_hash, result_hash=result_hash),
+            portfolio_construction=portfolio_construction,
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out = {
             "aureum_version": self.aureum_version,
             "certificate_spec_version": self.certificate_spec_version,
             "generated_at": self.generated_at,
@@ -216,6 +254,9 @@ class BacktestCertificate:
             "execution_trace": self.execution_trace,
             "determinism": self.determinism.to_dict(),
         }
+        if self.portfolio_construction is not None:
+            out["portfolio_construction"] = self.portfolio_construction.to_dict()
+        return out
 
     def to_json(self, indent: int = 2) -> str:
         return json.dumps(self.to_dict(), indent=indent, default=str, sort_keys=False)
@@ -228,6 +269,20 @@ class BacktestCertificate:
         execution = data["execution"]
         results = data["results"]
         determinism = data["determinism"]
+
+        portfolio_construction = None
+        if "portfolio_construction" in data:
+            pc = data["portfolio_construction"]
+            portfolio_construction = PortfolioConstruction(
+                objective=pc["objective"],
+                risk_measure=pc["risk_measure"],
+                covariance_estimator=pc["covariance_estimator"],
+                risk_free_rate=pc["risk_free_rate"],
+                constraints=pc.get("constraints", {}),
+                weights_history=pc.get("weights_history", []),
+                frontier_hash=pc.get("frontier_hash", ""),
+                optimization_inputs_hash=pc.get("optimization_inputs_hash", ""),
+            )
 
         return cls(
             aureum_version=data["aureum_version"],
@@ -276,6 +331,7 @@ class BacktestCertificate:
                 result_hash=determinism["result_hash"],
                 tolerance=determinism.get("tolerance", "1e-6 relative + 1e-9 absolute"),
             ),
+            portfolio_construction=portfolio_construction,
         )
 
     def with_draft_lineage(self, draft_lineage: dict[str, Any]) -> "BacktestCertificate":
