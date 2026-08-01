@@ -13,6 +13,7 @@ from .adapter import AlpacaAdapter
 from .author import StrategyAuthor
 from .backtest import BacktestRunner, MarketData
 from .certificate import get_environment
+from .diffopt import DifferentiableSharpeOptimizer, _find_repo_root  # noqa: F401
 from .mpt import OptimizationInputs, build_efficient_frontier, estimate_covariance, estimate_mean_returns
 from .prover import Lean4Generator, SmtLibGenerator, extract_claims
 from .reflector import StrategyReflector
@@ -195,7 +196,11 @@ def backtest(
 
     market_data = MarketData.from_csv(data)
     runner = BacktestRunner(
-        strategy, market_data, data_source=data_source, initial_nav=1_000_000.0
+        strategy,
+        market_data,
+        data_source=data_source,
+        initial_nav=1_000_000.0,
+        strategy_path=path,
     )
 
     if certificate or bundle or smt or lean:
@@ -227,8 +232,20 @@ def backtest(
             lean.write_text(Lean4Generator().generate(claims), encoding="utf-8")
             click.echo(f"Lean 4 file written to {lean.resolve()}")
 
+        extra_files: list[tuple[Path, str]] = []
+        portfolio_spec = strategy.portfolio()
+        if (
+            portfolio_spec
+            and portfolio_spec.get("objective") == "differentiable_sharpe"
+        ):
+            repo_root = _find_repo_root(path)
+            arch_file = repo_root / portfolio_spec["model"]["architecture_file"]
+            extra_files.append((arch_file, "model_architecture.yaml"))
+            if runner._diffopt and runner._diffopt.weights_path:
+                extra_files.append((runner._diffopt.weights_path, "trained_weights.npz"))
+
         if bundle:
-            _write_bundle(bundle, path, data, cert_json)
+            _write_bundle(bundle, path, data, cert_json, extra_files=extra_files)
             click.echo(f"Bundle written to {bundle.resolve()}")
 
         if not output:
@@ -358,7 +375,11 @@ def snapshot(symbols: str, start: str, end: str, output: Path, feed: str, timefr
 
 
 def _write_bundle(
-    bundle_path: Path, strategy_path: Path, data_path: Path, cert_json: str
+    bundle_path: Path,
+    strategy_path: Path,
+    data_path: Path,
+    cert_json: str,
+    extra_files: list[tuple[Path, str]] | None = None,
 ) -> None:
     """Create a reproducibility bundle tarball containing inputs and certificate."""
     bundle_path = Path(bundle_path)
@@ -371,6 +392,8 @@ def _write_bundle(
         info = tarfile.TarInfo(name="certificate.json")
         info.size = len(cert_bytes)
         tar.addfile(info, BytesIO(cert_bytes))
+        for file_path, arcname in extra_files or []:
+            tar.add(file_path, arcname=arcname)
 
 
 def main() -> None:

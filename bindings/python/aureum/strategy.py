@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -47,12 +48,16 @@ class Strategy:
             "maximum_sharpe",
             "risk_parity",
             "minimum_cvar",
+            "differentiable_sharpe",
         }:
             errors.append(
                 f"spec.portfolio.objective '{objective}' is not supported; "
                 "supported values: mean_variance, minimum_variance, maximum_sharpe, "
-                "risk_parity, minimum_cvar"
+                "risk_parity, minimum_cvar, differentiable_sharpe"
             )
+
+        if objective == "differentiable_sharpe":
+            self._validate_differentiable_sharpe(portfolio, errors)
         estimator = portfolio.get("covariance_estimator", "sample")
         if estimator not in {"sample", "ledoit_wolf"}:
             errors.append(
@@ -167,6 +172,56 @@ class Strategy:
                 }
             )
         return out
+
+    def _validate_differentiable_sharpe(
+        self, portfolio: dict[str, Any], errors: list[str]
+    ) -> None:
+        """Validate the ``spec.portfolio`` block when objective is differentiable_sharpe."""
+        model = portfolio.get("model")
+        if not isinstance(model, dict):
+            errors.append(
+                "spec.portfolio.model is required when objective is differentiable_sharpe"
+            )
+            return
+
+        architecture_file = model.get("architecture_file")
+        if not architecture_file:
+            errors.append(
+                "spec.portfolio.model.architecture_file is required "
+                "when objective is differentiable_sharpe"
+            )
+
+        training = portfolio.get("training")
+        if not isinstance(training, dict):
+            errors.append(
+                "spec.portfolio.training is required when objective is differentiable_sharpe"
+            )
+            return
+
+        required_fields = {
+            "learning_rate": "float",
+            "epochs": "int",
+            "train_end": "date (YYYY-MM-DD)",
+            "val_end": "date (YYYY-MM-DD)",
+        }
+        for field, kind in required_fields.items():
+            if field not in training:
+                errors.append(
+                    f"spec.portfolio.training.{field} is required ({kind}) "
+                    "when objective is differentiable_sharpe"
+                )
+
+        if "train_end" in training and "val_end" in training:
+            try:
+                train_end = dt.date.fromisoformat(training["train_end"])
+                val_end = dt.date.fromisoformat(training["val_end"])
+                if train_end >= val_end:
+                    errors.append("train_end must be strictly before val_end")
+            except ValueError:
+                errors.append(
+                    "spec.portfolio.training.train_end and val_end must be valid "
+                    "ISO dates (YYYY-MM-DD)"
+                )
 
     def to_dict(self) -> dict[str, Any]:
         return {

@@ -177,6 +177,9 @@ class PortfolioConstruction:
     weights_history: list[dict[str, Any]]
     frontier_hash: str = ""
     optimization_inputs_hash: str = ""
+    model_architecture_hash: str = ""
+    weights_hash: str = ""
+    train_val_test_split_hashes: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         out = {
@@ -191,6 +194,12 @@ class PortfolioConstruction:
             out["frontier_hash"] = self.frontier_hash
         if self.optimization_inputs_hash:
             out["optimization_inputs_hash"] = self.optimization_inputs_hash
+        if self.model_architecture_hash:
+            out["model_architecture_hash"] = self.model_architecture_hash
+        if self.weights_hash:
+            out["weights_hash"] = self.weights_hash
+        if self.train_val_test_split_hashes:
+            out["train_val_test_split_hashes"] = self.train_val_test_split_hashes
         return out
 
 
@@ -282,6 +291,9 @@ class BacktestCertificate:
                 weights_history=pc.get("weights_history", []),
                 frontier_hash=pc.get("frontier_hash", ""),
                 optimization_inputs_hash=pc.get("optimization_inputs_hash", ""),
+                model_architecture_hash=pc.get("model_architecture_hash", ""),
+                weights_hash=pc.get("weights_hash", ""),
+                train_val_test_split_hashes=pc.get("train_val_test_split_hashes", {}),
             )
 
         return cls(

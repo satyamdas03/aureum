@@ -238,6 +238,31 @@ This is the foundation for the future **Aureum Cloud** tier, where the same
 loop runs continuously on a portfolio of strategies and emails a model-risk
 report.
 
+## Edge 6: Differentiable certifiable execution
+
+When a strategy uses `spec.portfolio.objective: differentiable_sharpe`, the
+certificate records the full learned lineage of the model:
+
+- `model_architecture_hash` — SHA-256 of the model architecture YAML.
+- `weights_hash` — SHA-256 of the trained `trained_weights.npz`.
+- `train_val_test_split_hashes` — SHA-256 of each chronological data split.
+
+Because gradient-based training is slightly less deterministic than closed-form
+MPT optimizers, the certificate tolerance for diffopt runs is relaxed to
+`1e-5 relative + 1e-8 absolute`.  Reproducibility is still guaranteed because
+the JAX PRNG key is seeded from the SHA-256 of the strategy, architecture, and
+train split bytes.
+
+```bash
+aureum backtest examples/strategies/diffopt_sharpe.yaml \
+  --data examples/data/synthetic_prices.csv \
+  --certificate diffopt.json \
+  --bundle diffopt-run.tar.gz
+```
+
+The bundle includes `model_architecture.yaml` and `trained_weights.npz` so a
+validator can reconstruct the exact trained policy.
+
 ## Next steps
 
 - Read the [DSL reference](./dsl.md) to design your own strategies.

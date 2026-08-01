@@ -83,3 +83,35 @@ audit:
   deterministic: true
   deterministic_seed: 42
 ```
+
+## Differentiable certifiable execution (Edge 6)
+
+`spec.portfolio.objective` can be set to `differentiable_sharpe` to train a
+small JAX MLP to maximize out-of-sample Sharpe ratio.  The model architecture
+lives in a separate YAML file so it can be content-addressed independently of
+the strategy.
+
+```yaml
+portfolio:
+  objective: differentiable_sharpe
+  lookback_days: 252
+  long_only: true
+  max_weight: 0.25
+  model:
+    architecture_file: examples/models/sharpe_mlp.yaml
+  training:
+    learning_rate: 0.001
+    epochs: 100
+    batch_size: 16
+    l2_penalty: 0.001
+    max_weight_penalty: 10.0
+    early_stopping_patience: 20
+    train_end: "2023-06-30"
+    val_end: "2023-12-31"
+```
+
+The `train_end`/`val_end` dates split the data chronologically into train,
+validation, and test periods.  The MLP is trained on the train set, early-
+stopped on the validation set, and the backtest only takes positions during
+the test set.  The resulting weights, model architecture hash, and split
+hashes are recorded in the Aureum Backtest Certificate.

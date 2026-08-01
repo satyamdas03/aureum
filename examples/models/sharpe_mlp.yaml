@@ -1,0 +1,12 @@
+input_features:
+  - mean_return_252d
+  - volatility_252d
+  - momentum_12_1
+
+hidden_units:
+  - 64
+  - 32
+
+activation: softplus
+dropout: 0.0
+output_temperature: 1.0

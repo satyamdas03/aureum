@@ -26,6 +26,7 @@ from aureum.certificate import (
     Inputs,
     hash_file,
 )
+from aureum.diffopt import DifferentiableSharpeOptimizer
 from aureum.mpt import (
     OptimizationInputs,
     estimate_covariance,
@@ -277,11 +278,14 @@ class BacktestRunner:
         *,
         data_source: str = "csv",
         initial_nav: float = 1_000_000.0,
+        strategy_path: str | Path | None = None,
     ) -> None:
         self.strategy = strategy
         self.data = data
         self.data_source = data_source
         self.initial_nav = initial_nav
+        self.strategy_path = Path(strategy_path) if strategy_path else None
+        self._diffopt: DifferentiableSharpeOptimizer | None = None
 
     def run(self) -> BacktestResult:
         spec = self.strategy.spec
@@ -505,6 +509,35 @@ class BacktestRunner:
         long_only = portfolio_spec.get("long_only", True)
         max_weight = portfolio_spec.get("max_weight")
         min_weight = portfolio_spec.get("min_weight")
+
+        # Edge 6: differentiable Sharpe objective.
+        if objective == "differentiable_sharpe":
+            if self._diffopt is None:
+                if self.strategy_path is None:
+                    raise RuntimeError(
+                        "differentiable_sharpe requires a strategy path to resolve "
+                        "the architecture file; pass strategy_path to BacktestRunner"
+                    )
+                self._diffopt = DifferentiableSharpeOptimizer(
+                    self.strategy,
+                    self.data,
+                    strategy_path=self.strategy_path,
+                )
+            if date <= self._diffopt.val_end:
+                return {}, {
+                    "objective": "differentiable_sharpe",
+                    "note": "training/validation period - no positions",
+                    "eligible_count": len(candidates),
+                }
+            if not self._diffopt._trained:
+                self._diffopt.train()
+            weights_dict, meta = self._diffopt.weights_for_date(date, candidates)
+            target_values = {
+                symbol: nav * weight
+                for symbol, weight in weights_dict.items()
+                if weight > 1e-12
+            }
+            return target_values, meta
 
         # Gather returns for candidates that have enough history.
         symbols: list[str] = []
@@ -809,6 +842,13 @@ class BacktestRunner:
                 "lookback_days": portfolio_spec.get("lookback_days", 252),
                 "constraints": constraints,
             }
+
+            # Edge 6: include learned model lineage in the optimization inputs hash.
+            if portfolio_spec.get("objective") == "differentiable_sharpe" and self._diffopt:
+                config_for_hash["model_architecture_hash"] = self._diffopt.architecture_hash
+                config_for_hash["weights_hash"] = self._diffopt.weights_hash
+                config_for_hash["train_val_test_split_hashes"] = self._diffopt.split_hashes
+
             from aureum.certificate import _sha256_text, _stable_json
 
             portfolio_construction = PortfolioConstruction(
@@ -821,7 +861,20 @@ class BacktestRunner:
                 optimization_inputs_hash=_sha256_text(_stable_json(config_for_hash)),
             )
 
-        return BacktestCertificate.from_run(
+            # Edge 6: attach differentiable model lineage to the certificate.
+            if (
+                portfolio_spec.get("objective") == "differentiable_sharpe"
+                and self._diffopt
+            ):
+                portfolio_construction.model_architecture_hash = (
+                    self._diffopt.architecture_hash
+                )
+                portfolio_construction.weights_hash = self._diffopt.weights_hash
+                portfolio_construction.train_val_test_split_hashes = (
+                    self._diffopt.split_hashes
+                )
+
+        certificate = BacktestCertificate.from_run(
             environment=environment,
             inputs=inputs,
             execution=execution,
@@ -830,3 +883,9 @@ class BacktestRunner:
             execution_trace=execution_trace,
             portfolio_construction=portfolio_construction,
         )
+
+        # Edge 6: differentiable execution uses a slightly relaxed tolerance.
+        if portfolio_spec and portfolio_spec.get("objective") == "differentiable_sharpe":
+            certificate.determinism.tolerance = "1e-5 relative + 1e-8 absolute"
+
+        return certificate
