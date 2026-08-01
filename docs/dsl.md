@@ -28,6 +28,30 @@ spec:
 | `name` | string | Unique identifier |
 | `description` | string | Human-readable intent |
 | `tags` | list | Search/discovery tags |
+| `links` | list | Optional lineage links to external entities (Edge 5) |
+
+### `metadata.links`
+
+Declare explicit content-addressed lineage before a backtest runs.
+
+```yaml
+metadata:
+  name: linked-momentum
+  links:
+    # Untyped dependency by content hash.
+    - "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    # Typed link to a known entity.
+    - type: risk_model
+      relation: calibrated_with
+      entity_id: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    # Link resolved from a local path.
+    - type: data_snapshot
+      relation: backtest_input
+      path: examples/data/synthetic_prices.csv
+```
+
+See [Edge 5 — Semantic Knowledge Graph](./superpowers/edges/edge-05-semantic-graph.md)
+for the entity/relation model and persistence modes.
 
 ## Universe
 
@@ -82,4 +106,9 @@ audit:
   lineage: full
   deterministic: true
   deterministic_seed: 42
+  graph_persistence: inline   # none | inline | bundle (Edge 5)
 ```
+
+| Field | Values | Description |
+|---|---|---|
+| `graph_persistence` | `none`, `inline`, `bundle` | Build and persist the semantic knowledge graph (Edge 5) |

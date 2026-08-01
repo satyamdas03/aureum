@@ -1,0 +1,74 @@
+# Example Aureum strategy with semantic knowledge graph links.
+# This demonstrates the Edge 5 DSL additions:
+#   - metadata.links        : explicit lineage to external entities
+#   - spec.audit.graph_persistence : inline | bundle | none
+
+apiVersion: aureum.io/v1alpha1
+kind: Strategy
+metadata:
+  name: linked-momentum
+  description: |
+    Momentum strategy that explicitly declares its data snapshot and risk model
+    dependencies in the Aureum semantic knowledge graph.
+  tags: [momentum, equity, lineage]
+  links:
+    # Untyped dependency declared by content hash.
+    - "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    # Typed link to a risk model by content hash.
+    - type: risk_model
+      relation: calibrated_with
+      entity_id: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    # Typed link resolved from a local path (warns if not present in graph store).
+    - type: data_snapshot
+      relation: backtest_input
+      path: examples/data/synthetic_prices.csv
+
+spec:
+  universe:
+    source: sp500
+    filter:
+      sector: Technology
+      min_price: 5.00
+      min_adv20: 1000000
+
+  schedule:
+    rebalance: 1M
+    lookback: 252d
+
+  signals:
+    - name: momentum_12_1
+      description: 12-month return excluding last month (Jegadeesh-Titman)
+      expr: returns(close, 252).sum() - returns(close, 21).sum()
+      type: return
+
+  ranking:
+    by: momentum_12_1
+    ascending: false
+
+  weights:
+    kind: equal
+    top_n: 0.20
+
+  risk:
+    max_drawdown:
+      value: 0.30
+      hard: true
+    max_leverage:
+      value: 1.50
+      hard: true
+    max_turnover_annual:
+      value: 20.00
+      hard: false
+    max_concentration_single_name:
+      value: 0.30
+      hard: true
+
+  execution:
+    open: market_on_open
+    slippage: 0.0005
+
+  audit:
+    lineage: full
+    deterministic: true
+    deterministic_seed: 42
+    graph_persistence: inline

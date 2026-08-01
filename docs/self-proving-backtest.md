@@ -103,6 +103,34 @@ The tarball contains `strategy.yaml`, `data.csv`, and `certificate.json`.  A
 validator can extract the bundle, re-run the exact same command, and compare the
 new certificate against the bundled one.
 
+## Semantic knowledge graph (Edge 5)
+
+The backtest runner can emit a content-addressed semantic knowledge graph that
+records how the certificate, strategy, data, signals, risk model, portfolio
+recipe, positions, and run relate to each other.
+
+Enable it inline (inside `certificate.json`) or as a bundle sidecar:
+
+```bash
+# Inline graph
+aureum backtest examples/strategies/linked_strategy.yaml \
+  --data examples/data/synthetic_prices.csv \
+  --certificate certificate.json \
+  --graph inline
+
+# Bundle sidecar
+aureum backtest examples/strategies/linked_strategy.yaml \
+  --data examples/data/synthetic_prices.csv \
+  --certificate certificate.json \
+  --bundle linked-run.tar.gz \
+  --graph bundle
+```
+
+The example `linked_strategy.yaml` shows how to declare `metadata.links` so that
+external artifacts are wired into the graph before the backtest runs.  See
+[Edge 5 — Semantic Knowledge Graph](./superpowers/edges/edge-05-semantic-graph.md)
+for details.
+
 ## Catch a real bug
 
 The repo includes a deliberately misconfigured strategy that demonstrates what

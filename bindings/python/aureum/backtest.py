@@ -22,10 +22,14 @@ import numpy as np
 from aureum.certificate import (
     BacktestCertificate,
     Environment,
+    ExecutionSummary,
     InputLineage,
     Inputs,
+    PortfolioConstruction,
+    Results,
     hash_file,
 )
+from aureum.graph import EntityType, KnowledgeGraph, Relation
 from aureum.mpt import (
     OptimizationInputs,
     estimate_covariance,
@@ -713,6 +717,8 @@ class BacktestRunner:
         strategy_path: str | Path,
         data_path: str | Path,
         environment: Environment,
+        *,
+        graph_persistence: str = "none",
     ) -> BacktestCertificate:
         """Run the backtest and wrap the result in an Aureum Backtest Certificate."""
         from aureum.certificate import (
@@ -821,6 +827,22 @@ class BacktestRunner:
                 optimization_inputs_hash=_sha256_text(_stable_json(config_for_hash)),
             )
 
+        # Edge 5: build optional semantic knowledge graph.
+        knowledge_graph: KnowledgeGraph | None = None
+        graph_node_id: str | None = None
+        linked_entity_hashes: list[str] = []
+        if graph_persistence in {"inline", "bundle"}:
+            knowledge_graph, graph_node_id, linked_entity_hashes = self._build_knowledge_graph(
+                strategy_path=strategy_path,
+                data_path=data_path,
+                inputs=inputs,
+                execution=execution,
+                results=results,
+                portfolio_construction=portfolio_construction,
+                result=result,
+                environment=environment,
+            )
+
         return BacktestCertificate.from_run(
             environment=environment,
             inputs=inputs,
@@ -829,4 +851,229 @@ class BacktestRunner:
             risk_constraints=risk_results,
             execution_trace=execution_trace,
             portfolio_construction=portfolio_construction,
+            graph_node_id=graph_node_id,
+            linked_entity_hashes=linked_entity_hashes,
+            knowledge_graph=knowledge_graph,
         )
+
+    def _build_knowledge_graph(
+        self,
+        *,
+        strategy_path: Path,
+        data_path: Path,
+        inputs: Inputs,
+        execution: ExecutionSummary,
+        results: Results,
+        portfolio_construction: PortfolioConstruction | None,
+        result: BacktestResult,
+        environment: Environment,
+    ) -> tuple[KnowledgeGraph, str, list[str]]:
+        """Construct the semantic knowledge graph for this backtest run."""
+        from aureum.certificate import _sha256_text, _stable_json
+
+        graph = KnowledgeGraph()
+
+        strategy_payload = {
+            "api_version": self.strategy.api_version,
+            "kind": self.strategy.kind,
+            "name": self.strategy.metadata.get("name"),
+            "spec": self.strategy.spec,
+        }
+        strategy_node = graph.add_entity(
+            EntityType.STRATEGY, strategy_payload, source_path=str(strategy_path)
+        )
+
+        data_payload = {
+            "sha256": inputs.data.sha256,
+            "symbols": sorted(self.data.symbols),
+            "dates": len(self.data.dates),
+            "start_date": result.start_date,
+            "end_date": result.end_date,
+        }
+        data_node = graph.add_entity(
+            EntityType.DATA_SNAPSHOT, data_payload, source_path=str(data_path)
+        )
+
+        signal_nodes: list[Any] = []
+        for signal in self.strategy.spec.get("signals", []):
+            signal_payload = {
+                "name": signal.get("name"),
+                "expr": signal.get("expr"),
+                "type": signal.get("type"),
+            }
+            signal_nodes.append(graph.add_entity(EntityType.SIGNAL, signal_payload))
+
+        risk_model_node: Any | None = None
+        portfolio_recipe_node: Any | None = None
+        if portfolio_construction is not None:
+            risk_model_payload = {
+                "objective": portfolio_construction.objective,
+                "risk_measure": portfolio_construction.risk_measure,
+                "covariance_estimator": portfolio_construction.covariance_estimator,
+                "risk_free_rate": portfolio_construction.risk_free_rate,
+                "constraints": portfolio_construction.constraints,
+            }
+            risk_model_node = graph.add_entity(EntityType.RISK_MODEL, risk_model_payload)
+            final_weights = (
+                portfolio_construction.weights_history[-1].get("weights", {})
+                if portfolio_construction.weights_history
+                else {}
+            )
+            recipe_payload = {
+                "optimization_inputs_hash": portfolio_construction.optimization_inputs_hash,
+                "final_weights": final_weights,
+            }
+            portfolio_recipe_node = graph.add_entity(
+                EntityType.PORTFOLIO_RECIPE, recipe_payload
+            )
+
+        position_nodes: list[Any] = []
+        daily_positions_by_date = {dp["date"]: dp for dp in result.daily_positions}
+        for entry in result.rebalance_log:
+            date = entry["date"]
+            dp = daily_positions_by_date.get(date, {})
+            position_payload = {
+                "date": date,
+                "positions": dp.get("positions", {}),
+                "leverage": dp.get("leverage", 0.0),
+                "concentration": dp.get("concentration", 0.0),
+            }
+            position_nodes.append(graph.add_entity(EntityType.POSITION_SET, position_payload))
+
+        run_payload = {
+            "start_date": result.start_date,
+            "end_date": result.end_date,
+            "initial_nav": result.initial_nav,
+            "rebalance_count": len(result.rebalance_log),
+            "trades": result.trades,
+        }
+        run_node = graph.add_entity(EntityType.BACKTEST_RUN, run_payload)
+
+        input_hash = _sha256_text(_stable_json(inputs.to_dict()))
+        result_hash = _sha256_text(_stable_json(results.to_dict()))
+        certificate_payload = {
+            "aureum_version": environment.aureum_version,
+            "certificate_spec_version": "1.0",
+            "generated_at": dt.datetime.now(dt.timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z"),
+            "determinism": {
+                "input_hash": input_hash,
+                "result_hash": result_hash,
+            },
+        }
+        cert_node = graph.add_entity(EntityType.CERTIFICATE, certificate_payload)
+
+        graph.add_relation(
+            Relation.BACKTEST_INPUT, cert_node.entity_id, strategy_node.entity_id
+        )
+        graph.add_relation(
+            Relation.BACKTEST_INPUT, cert_node.entity_id, data_node.entity_id
+        )
+        graph.add_relation(
+            Relation.GENERATED_BY, cert_node.entity_id, run_node.entity_id
+        )
+        for signal_node in signal_nodes:
+            graph.add_relation(
+                Relation.USES_SIGNAL, run_node.entity_id, signal_node.entity_id
+            )
+        if risk_model_node is not None:
+            graph.add_relation(
+                Relation.CALIBRATED_WITH, run_node.entity_id, risk_model_node.entity_id
+            )
+        if portfolio_recipe_node is not None:
+            graph.add_relation(
+                Relation.DERIVED_FROM, run_node.entity_id, portfolio_recipe_node.entity_id
+            )
+        for position_node in position_nodes:
+            graph.add_relation(
+                Relation.BACKTEST_OUTPUT, run_node.entity_id, position_node.entity_id
+            )
+
+        linked_hashes = self._resolve_links(graph, strategy_path.parent)
+        for linked_id in linked_hashes:
+            graph.add_relation(
+                Relation.DEPENDS_ON, strategy_node.entity_id, linked_id
+            )
+
+        return graph, cert_node.entity_id, linked_hashes
+
+    def _resolve_links(
+        self,
+        graph: KnowledgeGraph,
+        strategy_dir: Path,
+    ) -> list[str]:
+        """Resolve ``metadata.links`` to entity IDs and add edges to the graph."""
+        import warnings
+
+        linked_hashes: list[str] = []
+        for link in self.strategy.links():
+            if isinstance(link, str):
+                entity_id = link
+                if graph.has_entity(entity_id):
+                    graph.add_relation(
+                        Relation.DEPENDS_ON,
+                        self._strategy_node_id(graph),
+                        entity_id,
+                    )
+                else:
+                    warnings.warn(
+                        f"metadata.links entity_id '{entity_id}' not present in graph; "
+                        "recording hash without edge"
+                    )
+                linked_hashes.append(entity_id)
+                continue
+
+            if not isinstance(link, dict):
+                warnings.warn(
+                    f"metadata.links entry ignored: unexpected type {type(link).__name__}"
+                )
+                continue
+
+            entity_id = link.get("entity_id")
+            path = link.get("path")
+            relation_value = link.get("relation", Relation.DEPENDS_ON.value)
+            relation = Relation(relation_value)
+
+            if entity_id:
+                linked_hashes.append(entity_id)
+                if graph.has_entity(entity_id):
+                    graph.add_relation(
+                        relation, self._strategy_node_id(graph), entity_id
+                    )
+                else:
+                    warnings.warn(
+                        f"metadata.links entity_id '{entity_id}' not present in graph; "
+                        "recording hash without edge"
+                    )
+                continue
+
+            if path:
+                full_path = Path(path) if Path(path).is_absolute() else strategy_dir / path
+                if full_path.exists():
+                    file_hash = hash_file(full_path)
+                    placeholder = graph.add_entity(
+                        EntityType.DATA_SNAPSHOT,
+                        {"sha256": file_hash, "path": str(path)},
+                        source_path=str(full_path),
+                    )
+                    graph.add_relation(
+                        relation, self._strategy_node_id(graph), placeholder.entity_id
+                    )
+                    linked_hashes.append(placeholder.entity_id)
+                else:
+                    warnings.warn(f"metadata.links path not found: {path}")
+
+        return linked_hashes
+
+    def _strategy_node_id(self, graph: KnowledgeGraph) -> str:
+        """Return the content-addressed ID of the strategy node in ``graph``."""
+        strategy_payload = {
+            "api_version": self.strategy.api_version,
+            "kind": self.strategy.kind,
+            "name": self.strategy.metadata.get("name"),
+            "spec": self.strategy.spec,
+        }
+        from aureum.graph import _entity_id
+
+        return _entity_id(EntityType.STRATEGY, strategy_payload)

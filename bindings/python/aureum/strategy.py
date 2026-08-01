@@ -8,6 +8,8 @@ from typing import Any
 
 import yaml
 
+from aureum.graph import EntityType, Relation
+
 
 @dataclass
 class Strategy:
@@ -124,7 +126,63 @@ class Strategy:
             errors.append("spec.weights is required")
         if "execution" not in spec:
             errors.append("spec.execution is required")
+        self._validate_metadata_links(errors)
+        self._validate_audit_graph_persistence(errors)
         return errors
+
+    def _validate_metadata_links(self, errors: list[str]) -> None:
+        """Validate the optional ``metadata.links`` graph links section."""
+        links = self.metadata.get("links")
+        if links is None:
+            return
+        if not isinstance(links, list):
+            errors.append("metadata.links must be a list")
+            return
+        for idx, entry in enumerate(links):
+            prefix = f"metadata.links[{idx}]"
+            if isinstance(entry, str):
+                if not entry:
+                    errors.append(f"{prefix}: plain entry must be a non-empty string")
+                continue
+            if not isinstance(entry, dict):
+                errors.append(f"{prefix}: entry must be a string or an object")
+                continue
+            if "entity_id" not in entry and "path" not in entry:
+                errors.append(
+                    f"{prefix}: object entry must have either 'entity_id' or 'path'"
+                )
+            relation = entry.get("relation")
+            if relation is not None and relation not in {r.value for r in Relation}:
+                valid = ", ".join(sorted(r.value for r in Relation))
+                errors.append(
+                    f"{prefix}: relation '{relation}' is not supported; supported values: {valid}"
+                )
+            entity_type = entry.get("type")
+            if entity_type is not None and entity_type not in {e.value for e in EntityType}:
+                valid = ", ".join(sorted(e.value for e in EntityType))
+                errors.append(
+                    f"{prefix}: type '{entity_type}' is not supported; supported values: {valid}"
+                )
+
+    def _validate_audit_graph_persistence(self, errors: list[str]) -> None:
+        """Validate the optional ``spec.audit.graph_persistence`` setting."""
+        audit = self.spec.get("audit", {})
+        value = audit.get("graph_persistence")
+        if value is None:
+            return
+        if value not in {"none", "inline", "bundle"}:
+            errors.append(
+                f"spec.audit.graph_persistence '{value}' is not supported; "
+                "supported values: none, inline, bundle"
+            )
+
+    def links(self) -> list[Any]:
+        """Return the ``metadata.links`` list if present, else []."""
+        return self.metadata.get("links", [])
+
+    def graph_persistence(self) -> str:
+        """Return the ``spec.audit.graph_persistence`` value, defaulting to ``none``."""
+        return self.spec.get("audit", {}).get("graph_persistence", "none")
 
     def portfolio(self) -> dict[str, Any] | None:
         """Return the ``spec.portfolio`` block if present, else None."""

@@ -12,7 +12,7 @@ import click
 from .adapter import AlpacaAdapter
 from .author import StrategyAuthor
 from .backtest import BacktestRunner, MarketData
-from .certificate import get_environment
+from .certificate import get_environment, hash_file
 from .mpt import OptimizationInputs, build_efficient_frontier, estimate_covariance, estimate_mean_returns
 from .prover import Lean4Generator, SmtLibGenerator, extract_claims
 from .reflector import StrategyReflector
@@ -167,6 +167,13 @@ def reflect(
     type=click.Path(path_type=Path),
     help="Output Lean 4 verifier theorem file path",
 )
+@click.option(
+    "--graph",
+    type=click.Choice(["none", "inline", "bundle"], case_sensitive=False),
+    default="none",
+    show_default=True,
+    help="Knowledge graph persistence mode for lineage",
+)
 def backtest(
     path: Path,
     data: Path | None,
@@ -175,6 +182,7 @@ def backtest(
     bundle: Path | None,
     smt: Path | None,
     lean: Path | None,
+    graph: str,
 ) -> None:
     """Run a deterministic backtest for a strategy."""
     strategy = Strategy.from_file(path)
@@ -193,15 +201,22 @@ def backtest(
         click.echo("Error: --data is required for real backtests in this version.")
         raise click.Abort()
 
+    graph_persistence = strategy.graph_persistence()
+    if graph != "none":
+        graph_persistence = graph
+
     market_data = MarketData.from_csv(data)
     runner = BacktestRunner(
         strategy, market_data, data_source=data_source, initial_nav=1_000_000.0
     )
 
-    if certificate or bundle or smt or lean:
+    if certificate or bundle or smt or lean or graph_persistence in {"inline", "bundle"}:
         env = get_environment(aureum_version=__version__, cwd=path.parent)
         cert = runner.build_certificate(
-            strategy_path=path, data_path=data, environment=env
+            strategy_path=path,
+            data_path=data,
+            environment=env,
+            graph_persistence=graph_persistence,
         )
         cert_json = cert.to_json(indent=2)
         cert_dict = cert.to_dict()
@@ -227,8 +242,27 @@ def backtest(
             lean.write_text(Lean4Generator().generate(claims), encoding="utf-8")
             click.echo(f"Lean 4 file written to {lean.resolve()}")
 
+        graph_path: Path | None = None
+        if graph_persistence == "bundle" and certificate:
+            graph_path = certificate.with_suffix(".graph.json")
+        elif graph_persistence == "bundle" and bundle:
+            graph_path = bundle.with_suffix(".graph.json")
+
+        if graph_path is not None and cert.knowledge_graph is not None:
+            graph_path.write_text(cert.knowledge_graph.to_json(indent=2), encoding="utf-8")
+            cert_dict["graph_path"] = str(graph_path)
+            cert_dict["graph_sha256"] = hash_file(graph_path)
+            cert_json = json.dumps(cert_dict, indent=2, default=str, sort_keys=False)
+            if certificate:
+                certificate.write_text(cert_json, encoding="utf-8")
+            click.echo(f"Graph sidecar written to {graph_path.resolve()}")
+
+        extra_files: list[tuple[Path, str]] = []
+        if graph_path is not None and graph_path.exists():
+            extra_files.append((graph_path, "certificate.graph.json"))
+
         if bundle:
-            _write_bundle(bundle, path, data, cert_json)
+            _write_bundle(bundle, path, data, cert_json, extra_files=extra_files)
             click.echo(f"Bundle written to {bundle.resolve()}")
 
         if not output:
@@ -358,7 +392,11 @@ def snapshot(symbols: str, start: str, end: str, output: Path, feed: str, timefr
 
 
 def _write_bundle(
-    bundle_path: Path, strategy_path: Path, data_path: Path, cert_json: str
+    bundle_path: Path,
+    strategy_path: Path,
+    data_path: Path,
+    cert_json: str,
+    extra_files: list[tuple[Path, str]] | None = None,
 ) -> None:
     """Create a reproducibility bundle tarball containing inputs and certificate."""
     bundle_path = Path(bundle_path)
@@ -371,6 +409,8 @@ def _write_bundle(
         info = tarfile.TarInfo(name="certificate.json")
         info.size = len(cert_bytes)
         tar.addfile(info, BytesIO(cert_bytes))
+        for file_path, arcname in extra_files or []:
+            tar.add(file_path, arcname=arcname)
 
 
 def main() -> None:

@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from aureum.graph import KnowledgeGraph
+
 
 def _sha256_file(path: Path) -> str:
     """Return the SHA-256 hex digest of a file's raw bytes."""
@@ -209,6 +211,10 @@ class BacktestCertificate:
     execution_trace: dict[str, Any]
     determinism: Determinism
     portfolio_construction: PortfolioConstruction | None = None
+    # Edge 5 — semantic knowledge graph lineage.
+    graph_node_id: str | None = None
+    linked_entity_hashes: list[str] = field(default_factory=list)
+    knowledge_graph: KnowledgeGraph | None = None
 
     @classmethod
     def from_run(
@@ -221,6 +227,9 @@ class BacktestCertificate:
         risk_constraints: list[dict[str, Any]],
         execution_trace: dict[str, Any],
         portfolio_construction: PortfolioConstruction | None = None,
+        graph_node_id: str | None = None,
+        linked_entity_hashes: list[str] | None = None,
+        knowledge_graph: KnowledgeGraph | None = None,
     ) -> BacktestCertificate:
         """Build a certificate from the raw parts of a backtest run."""
         input_hash = _sha256_text(_stable_json(inputs.to_dict()))
@@ -239,6 +248,9 @@ class BacktestCertificate:
             execution_trace=execution_trace,
             determinism=Determinism(input_hash=input_hash, result_hash=result_hash),
             portfolio_construction=portfolio_construction,
+            graph_node_id=graph_node_id,
+            linked_entity_hashes=list(linked_entity_hashes) if linked_entity_hashes else [],
+            knowledge_graph=knowledge_graph,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -256,6 +268,12 @@ class BacktestCertificate:
         }
         if self.portfolio_construction is not None:
             out["portfolio_construction"] = self.portfolio_construction.to_dict()
+        if self.graph_node_id is not None:
+            out["graph_node_id"] = self.graph_node_id
+        if self.linked_entity_hashes:
+            out["linked_entity_hashes"] = self.linked_entity_hashes
+        if self.knowledge_graph is not None:
+            out["knowledge_graph"] = self.knowledge_graph.to_dict()
         return out
 
     def to_json(self, indent: int = 2) -> str:
@@ -283,6 +301,10 @@ class BacktestCertificate:
                 frontier_hash=pc.get("frontier_hash", ""),
                 optimization_inputs_hash=pc.get("optimization_inputs_hash", ""),
             )
+
+        knowledge_graph = None
+        if "knowledge_graph" in data:
+            knowledge_graph = KnowledgeGraph.from_dict(data["knowledge_graph"])
 
         return cls(
             aureum_version=data["aureum_version"],
@@ -332,6 +354,9 @@ class BacktestCertificate:
                 tolerance=determinism.get("tolerance", "1e-6 relative + 1e-9 absolute"),
             ),
             portfolio_construction=portfolio_construction,
+            graph_node_id=data.get("graph_node_id"),
+            linked_entity_hashes=list(data.get("linked_entity_hashes", [])),
+            knowledge_graph=knowledge_graph,
         )
 
     def with_draft_lineage(self, draft_lineage: dict[str, Any]) -> "BacktestCertificate":
