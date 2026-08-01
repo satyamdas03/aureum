@@ -1,0 +1,62 @@
+# Example Aureum portfolio strategy using Causal MPT (Edge 2).
+# A declared latent tech-sector driver is conditioned out of the covariance
+# matrix before running a long-only minimum-variance optimization.
+
+apiVersion: aureum.io/v1alpha1
+kind: Strategy
+metadata:
+  name: causal-mpt-tech-minvar
+  description: |
+    Long-only minimum-variance portfolio of US tech stocks with a declared
+    latent tech driver removed from covariance before optimization.
+  tags: [mpt, causal, minimum_variance, tech]
+
+spec:
+  universe:
+    source: sp500
+    filter:
+      sector: Technology
+      min_price: 5.00
+      min_adv20: 1_000_000
+
+  schedule:
+    rebalance: 1M
+    lookback: 252d
+
+  portfolio:
+    objective: minimum_variance
+    risk_measure: variance
+    covariance_estimator: sample
+    lookback_days: 252
+    long_only: true
+    causal_graph:
+      drivers:
+        - name: tech_factor
+      edges:
+        - from: tech_factor
+          to: [AAPL, MSFT, NVDA, GOOGL]
+    causal_separation:
+      mode: condition_on
+      drivers: [tech_factor]
+
+  risk:
+    max_drawdown:
+      value: 0.30
+      hard: true
+    max_leverage:
+      value: 1.00
+      hard: true
+    max_turnover_annual:
+      value: 20.00
+      hard: false
+    max_concentration_single_name:
+      value: 0.35
+      hard: true
+
+  execution:
+    open: market_on_open
+    slippage: 0.0005
+
+  audit:
+    lineage: full
+    deterministic: true
