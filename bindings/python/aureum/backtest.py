@@ -34,6 +34,7 @@ from aureum.certificate import (
     Results,
     hash_file,
 )
+from aureum.conformal import optimize_conformalized_portfolio
 from aureum.graph import EntityType, KnowledgeGraph, Relation
 from aureum.mpt import (
     OptimizationInputs,
@@ -444,6 +445,8 @@ class BacktestRunner:
                     log_entry["scores"] = {s: round(scores[s], 6) for s in selected}
                 if portfolio_meta is not None:
                     log_entry["portfolio"] = portfolio_meta
+                    if "conformal" in portfolio_meta:
+                        log_entry["conformal"] = portfolio_meta["conformal"]
                 rebalance_log.append(log_entry)
 
         final_nav = daily_nav[-1]["nav"] if daily_nav else self.initial_nav
@@ -538,6 +541,70 @@ class BacktestRunner:
             }
 
         returns_arr = np.array(return_matrix).T
+
+        if objective == "conformalized_portfolio":
+            uncertainty = portfolio_spec.get("uncertainty", {})
+            coverage = float(uncertainty.get("coverage", 0.95))
+            calibration_fraction = float(uncertainty.get("calibration_fraction", 0.20))
+            base_objective = portfolio_spec["base_objective"]
+
+            cresult = optimize_conformalized_portfolio(
+                returns_arr,
+                base_objective=base_objective,
+                coverage=coverage,
+                calibration_fraction=calibration_fraction,
+                covariance_estimator=covariance_estimator,
+                risk_measure=risk_measure,
+                risk_free_rate=risk_free_rate,
+                long_only=long_only,
+                max_weight=max_weight,
+                min_weight=min_weight,
+                target_return=portfolio_spec.get("target_return"),
+                target_risk=portfolio_spec.get("target_risk"),
+            )
+
+            target_values = {
+                symbol: nav * float(weight)
+                for symbol, weight in zip(symbols, cresult.weights)
+                if weight > 1e-12
+            }
+            conformal_meta: dict[str, Any] = {
+                "objective": "conformalized_portfolio",
+                "base_objective": cresult.base_objective,
+                "risk_measure": cresult.risk_measure,
+                "expected_return": round(cresult.expected_return, 8),
+                "base_expected_return": round(cresult.base_expected_return, 8),
+                "risk": round(cresult.risk, 8),
+                "covariance_estimator": cresult.covariance_estimator,
+                "lookback_days": lookback_days,
+                "eligible_count": len(symbols),
+                "weights": {
+                    symbol: round(float(weight), 6)
+                    for symbol, weight in zip(symbols, cresult.weights)
+                },
+                "coverage": cresult.coverage,
+                "calibration_fraction": cresult.calibration_fraction,
+                "calibration_hash": cresult.calibration_hash,
+                "mean_prediction_set_width": round(cresult.mean_width, 8),
+                "max_prediction_set_width": round(cresult.max_width, 8),
+                "conformal": {
+                    "coverage": cresult.coverage,
+                    "calibration_fraction": cresult.calibration_fraction,
+                    "mean_width": round(cresult.mean_width, 8),
+                    "lower_bounds": {
+                        symbol: round(float(value), 8)
+                        for symbol, value in zip(symbols, cresult.lower_bounds)
+                    },
+                    "upper_bounds": {
+                        symbol: round(float(value), 8)
+                        for symbol, value in zip(symbols, cresult.upper_bounds)
+                    },
+                },
+            }
+            if cresult.warning:
+                conformal_meta["conformal_warning"] = cresult.warning
+            return target_values, conformal_meta
+
         mu = estimate_mean_returns(returns_arr, method="sample")
         cov = estimate_covariance(returns_arr, estimator=covariance_estimator)
 
@@ -895,6 +962,25 @@ class BacktestRunner:
                 result=result,
                 environment=environment,
             )
+
+            # Edge 3: populate conformal lineage fields from the latest rebalance.
+            conformal_log = next(
+                (
+                    entry
+                    for entry in reversed(result.rebalance_log)
+                    if "conformal" in entry and "portfolio" in entry
+                ),
+                None,
+            )
+            if conformal_log is not None:
+                portfolio_meta = conformal_log["portfolio"]
+                portfolio_construction.calibration_set_hash = portfolio_meta.get(
+                    "calibration_hash", ""
+                )
+                portfolio_construction.coverage_level = portfolio_meta.get("coverage", 0.0)
+                portfolio_construction.prediction_set_width = portfolio_meta.get(
+                    "mean_prediction_set_width", 0.0
+                )
 
         return BacktestCertificate.from_run(
             environment=environment,

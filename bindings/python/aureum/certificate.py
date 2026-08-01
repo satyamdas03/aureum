@@ -184,6 +184,9 @@ class PortfolioConstruction:
     model_architecture_hash: str = ""
     weights_hash: str = ""
     train_val_test_split_hashes: dict[str, str] = field(default_factory=dict)
+    calibration_set_hash: str = ""
+    coverage_level: float = 0.0
+    prediction_set_width: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         out = {
@@ -208,6 +211,12 @@ class PortfolioConstruction:
             out["weights_hash"] = self.weights_hash
         if self.train_val_test_split_hashes:
             out["train_val_test_split_hashes"] = self.train_val_test_split_hashes
+        if self.calibration_set_hash:
+            out["calibration_set_hash"] = self.calibration_set_hash
+        if self.coverage_level:
+            out["coverage_level"] = self.coverage_level
+        if self.prediction_set_width:
+            out["prediction_set_width"] = self.prediction_set_width
         return out
 
 
@@ -320,6 +329,9 @@ class BacktestCertificate:
                 model_architecture_hash=pc.get("model_architecture_hash", ""),
                 weights_hash=pc.get("weights_hash", ""),
                 train_val_test_split_hashes=pc.get("train_val_test_split_hashes", {}),
+                calibration_set_hash=pc.get("calibration_set_hash", ""),
+                coverage_level=pc.get("coverage_level", 0.0),
+                prediction_set_width=pc.get("prediction_set_width", 0.0),
             )
 
         knowledge_graph = None

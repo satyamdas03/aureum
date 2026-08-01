@@ -99,6 +99,39 @@ risk:
     hard: true
 ```
 
+## Portfolio objectives
+
+Aureum supports classical MPT optimizers and a conformalized wrapper that
+replaces point forecasts with conservative lower bounds from split-conformal
+prediction intervals.
+
+### Conformalized portfolio
+
+```yaml
+portfolio:
+  objective: conformalized_portfolio
+  base_objective: mean_variance
+  uncertainty:
+    method: conformal_split
+    coverage: 0.95
+    calibration_fraction: 0.20
+  target_return: 0.001
+  risk_measure: variance
+  covariance_estimator: sample
+  lookback_days: 252
+  long_only: true
+  max_weight: 0.40
+  min_weight: 0.00
+```
+
+Validation rules:
+
+- `spec.portfolio.uncertainty` is required when `objective` is `conformalized_portfolio`.
+- `spec.portfolio.uncertainty.method` must be `conformal_split`.
+- `spec.portfolio.uncertainty.coverage` must be a float in `(0, 1)`; default `0.95`.
+- `spec.portfolio.uncertainty.calibration_fraction` must be a float in `(0, 1)`; default `0.20`.
+- `spec.portfolio.base_objective` is required and must be one of `mean_variance`, `minimum_variance`, `maximum_sharpe`, or `risk_parity`.
+
 ## Audit
 
 ```yaml
