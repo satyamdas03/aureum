@@ -195,6 +195,20 @@ class PortfolioConstruction:
 
 
 @dataclass
+class AlphaLineage:
+    """Lineage for neuro-symbolic alpha signals used in a backtest."""
+
+    alpha_signals: list[dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"alpha_signals": self.alpha_signals}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AlphaLineage":
+        return cls(alpha_signals=data.get("alpha_signals", []))
+
+
+@dataclass
 class BacktestCertificate:
     """Structured, machine-checkable audit artifact for a single backtest run."""
 
@@ -209,6 +223,7 @@ class BacktestCertificate:
     execution_trace: dict[str, Any]
     determinism: Determinism
     portfolio_construction: PortfolioConstruction | None = None
+    alpha_lineage: AlphaLineage | None = None
 
     @classmethod
     def from_run(
@@ -221,6 +236,7 @@ class BacktestCertificate:
         risk_constraints: list[dict[str, Any]],
         execution_trace: dict[str, Any],
         portfolio_construction: PortfolioConstruction | None = None,
+        alpha_lineage: AlphaLineage | None = None,
     ) -> BacktestCertificate:
         """Build a certificate from the raw parts of a backtest run."""
         input_hash = _sha256_text(_stable_json(inputs.to_dict()))
@@ -239,6 +255,7 @@ class BacktestCertificate:
             execution_trace=execution_trace,
             determinism=Determinism(input_hash=input_hash, result_hash=result_hash),
             portfolio_construction=portfolio_construction,
+            alpha_lineage=alpha_lineage,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -256,6 +273,8 @@ class BacktestCertificate:
         }
         if self.portfolio_construction is not None:
             out["portfolio_construction"] = self.portfolio_construction.to_dict()
+        if self.alpha_lineage is not None:
+            out["alpha_lineage"] = self.alpha_lineage.to_dict()
         return out
 
     def to_json(self, indent: int = 2) -> str:
@@ -332,6 +351,9 @@ class BacktestCertificate:
                 tolerance=determinism.get("tolerance", "1e-6 relative + 1e-9 absolute"),
             ),
             portfolio_construction=portfolio_construction,
+            alpha_lineage=AlphaLineage.from_dict(data["alpha_lineage"])
+            if "alpha_lineage" in data
+            else None,
         )
 
     def with_draft_lineage(self, draft_lineage: dict[str, Any]) -> "BacktestCertificate":

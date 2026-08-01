@@ -1,0 +1,61 @@
+# Example Aureum Quant Kernel strategy DSL
+# Neuro-symbolic alpha: short-term momentum reversal over a volume filter.
+
+apiVersion: aureum.io/v1alpha1
+kind: Strategy
+metadata:
+  name: alpha-momentum-reversal
+  description: |
+    Rank names by a neuro-symbolic alpha that blends a 5-day return
+    z-score with dollar-volume smoothing.  A positive alpha is interpreted
+    as momentum; the strategy ranks descending.
+  tags: [neuro_symbolic, alpha, momentum, equity]
+
+spec:
+  universe:
+    source: sp500
+    filter:
+      min_price: 5.00
+      min_adv20: 1000000
+
+  schedule:
+    rebalance: 1M
+    lookback: 252d
+
+  signals:
+    alpha:
+      type: neuro_symbolic
+      formula: if_else(gt(dollar_volume(close, volume, 20), 5_000_000.0), zscore(returns(close, 5), 63), 0.0)
+      description: 5-day return z-score, only computed for liquid names
+      generation:
+        llm_model: claude-sonnet-5
+        prompt: A liquid-aware short-term momentum alpha
+        safety_checks_passed: true
+
+  ranking:
+    by: alpha
+    ascending: false
+
+  weights:
+    kind: equal
+    top_n: 0.10
+
+  risk:
+    max_drawdown:
+      value: 0.20
+      hard: true
+    max_leverage:
+      value: 1.00
+      hard: true
+    max_turnover_annual:
+      value: 52.00
+      hard: false
+
+  execution:
+    open: market_on_open
+    slippage: 0.0005
+
+  audit:
+    lineage: full
+    deterministic: true
+    deterministic_seed: 42

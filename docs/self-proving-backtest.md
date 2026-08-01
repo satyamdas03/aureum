@@ -238,6 +238,34 @@ This is the foundation for the future **Aureum Cloud** tier, where the same
 loop runs continuously on a portfolio of strategies and emails a model-risk
 report.
 
+## Alpha lineage (Edge 4)
+
+When a backtest uses neuro-symbolic alpha signals, the certificate records an
+`alpha_lineage` block describing each formula, its parsed AST, and the safety
+verdict.  This makes the alpha fully auditable: every primitive is drawn from
+a deterministic, whitelist grammar with no look-ahead and no stochastic
+inputs.
+
+### Generate an alpha from a prompt
+
+```bash
+export ANTHROPIC_API_KEY=...
+aureum alpha "A liquid-aware short-term momentum alpha" \
+  --name alpha-momentum-reversal \
+  --output examples/strategies/alpha_momentum_reversal.yaml
+```
+
+### Validate a formula without calling the LLM
+
+```bash
+aureum alpha "sma(close, 20) / close" --validate-only
+```
+
+The safety checker rejects unknown functions, negative lags, stochastic
+primitives, and price-level constants.  When the backtest certificate is
+emitted, the alpha lineage is included so reviewers can reconstruct exactly
+which signal was evaluated on each bar.
+
 ## Next steps
 
 - Read the [DSL reference](./dsl.md) to design your own strategies.

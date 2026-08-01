@@ -8,6 +8,16 @@ from typing import Any
 
 import yaml
 
+from aureum.alpha import AlphaGrammar, safety_check
+
+
+BUILTIN_RANKING_SIGNALS = {
+    "momentum_12_1",
+    "volatility_20d",
+    "sharpe_63d",
+    "mean_reversion_5_20",
+}
+
 
 @dataclass
 class Strategy:
@@ -21,6 +31,10 @@ class Strategy:
     @classmethod
     def from_yaml(cls, text: str) -> Strategy:
         data = yaml.safe_load(text)
+        return cls.from_dict(data)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Strategy:
         return cls(
             api_version=data.get("apiVersion", ""),
             kind=data.get("kind", ""),
@@ -95,21 +109,18 @@ class Strategy:
         if not uses_portfolio and not uses_ranking:
             errors.append("spec.ranking is required (or use spec.portfolio for MPT optimization)")
 
+        # Validate signal definitions (including neuro-symbolic formulas).
+        defined_signals = self._validate_signals(errors)
+
         if uses_ranking:
             ranking = spec["ranking"]
             signal_name = ranking.get("by")
             if not signal_name:
                 errors.append("spec.ranking.by is required")
-            elif signal_name not in {
-                "momentum_12_1",
-                "volatility_20d",
-                "sharpe_63d",
-                "mean_reversion_5_20",
-            }:
+            elif signal_name not in BUILTIN_RANKING_SIGNALS and signal_name not in defined_signals:
                 errors.append(
-                    f"spec.ranking.by '{signal_name}' is not supported; "
-                    "supported values: momentum_12_1, volatility_20d, "
-                    "sharpe_63d, mean_reversion_5_20"
+                    f"spec.ranking.by '{signal_name}' is not defined; "
+                    "define it under spec.signals or use a built-in signal"
                 )
 
         if uses_portfolio:
@@ -125,6 +136,45 @@ class Strategy:
         if "execution" not in spec:
             errors.append("spec.execution is required")
         return errors
+
+    def _validate_signals(self, errors: list[str]) -> set[str]:
+        """Validate signal definitions and return the set of defined names."""
+        defined: set[str] = set()
+        signals = self.spec.get("signals", {})
+        if not signals:
+            return defined
+
+        if isinstance(signals, list):
+            for signal in signals:
+                name = signal.get("name")
+                if not name:
+                    continue
+                defined.add(name)
+        elif isinstance(signals, dict):
+            for name, signal in signals.items():
+                defined.add(name)
+                if signal.get("type") == "neuro_symbolic":
+                    formula = signal.get("formula", "")
+                    if not formula:
+                        errors.append(f"spec.signals.{name}.formula is required for neuro_symbolic signal")
+                        continue
+                    ast, parse_error = AlphaGrammar.parse(formula)
+                    if parse_error or ast is None:
+                        errors.append(f"spec.signals.{name}.formula parse error: {parse_error or 'unknown'}")
+                        continue
+                    report = safety_check(ast, formula=formula)
+                    if not report.safe:
+                        for failure in report.failures:
+                            errors.append(f"spec.signals.{name}.formula safety: {failure}")
+                        continue
+                    # Safety-check flag must be honest when present.
+                    generation = signal.get("generation", {})
+                    if generation.get("safety_checks_passed") is False:
+                        errors.append(
+                            f"spec.signals.{name}.generation.safety_checks_passed is false; "
+                            "formula must pass safety checks"
+                        )
+        return defined
 
     def portfolio(self) -> dict[str, Any] | None:
         """Return the ``spec.portfolio`` block if present, else None."""

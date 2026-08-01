@@ -11,6 +11,9 @@ import click
 
 from .adapter import AlpacaAdapter
 from .author import StrategyAuthor
+import yaml
+
+from .alpha import AlphaGrammar, AlphaMiner, safety_check
 from .backtest import BacktestRunner, MarketData
 from .certificate import get_environment
 from .mpt import OptimizationInputs, build_efficient_frontier, estimate_covariance, estimate_mean_returns
@@ -82,6 +85,88 @@ def author(
         click.echo(f"Rationale: {result.rationale}")
     if result.certificate_path:
         click.echo(f"Dry-run certificate: {result.certificate_path.resolve()}")
+
+
+@cli.command()
+@click.argument("prompt", required=False)
+@click.option(
+    "--output",
+    type=click.Path(path_type=Path),
+    help="Output strategy YAML path",
+)
+@click.option("--model", default="claude-sonnet-5", help="Anthropic model name")
+@click.option(
+    "--validate-only",
+    is_flag=True,
+    help="Only validate the formula safety, do not call the LLM",
+)
+@click.option("--name", default="alpha_strategy", help="Strategy name")
+def alpha(
+    prompt: str | None,
+    output: Path | None,
+    model: str,
+    validate_only: bool,
+    name: str,
+) -> None:
+    """Generate or validate a neuro-symbolic alpha formula.
+
+    With PROMPT, ask the LLM for a deterministic alpha formula. With
+    --validate-only, validate that PROMPT is a safe formula and exit.
+    """
+    if validate_only:
+        if not prompt:
+            click.echo("Error: PROMPT is required for --validate-only")
+            raise click.Abort()
+        ast, parse_error = AlphaGrammar.parse(prompt)
+        if parse_error or ast is None:
+            click.echo(f"Parse error: {parse_error or 'unknown'}")
+            raise click.Abort()
+        report = safety_check(ast, formula=prompt)
+        if not report.safe:
+            click.echo("Safety check failed:")
+            for failure in report.failures:
+                click.echo(f"  - {failure}")
+            raise click.Abort()
+        click.echo(f"Formula '{prompt}' passed all safety checks.")
+        return
+
+    if not prompt:
+        click.echo("Error: PROMPT is required unless using --validate-only")
+        raise click.Abort()
+
+    miner = AlphaMiner(model=model)
+    result = miner.generate(prompt=prompt, strategy_name=name)
+    if not result.formula:
+        click.echo("Error: no alpha formula was generated")
+        if result.rationale:
+            click.echo(f"Rationale: {result.rationale}")
+        raise click.Abort()
+
+    if output:
+        strategy_data = {
+            "apiVersion": "aureum.io/v1alpha1",
+            "kind": "Strategy",
+            "metadata": {"name": name, "description": f"LLM-generated neuro-symbolic alpha: {prompt}"},
+            "spec": {
+                "signals": {
+                    "alpha": {
+                        "type": "neuro_symbolic",
+                        "formula": result.formula,
+                        "generation": {
+                            "llm_model": model,
+                            "prompt": prompt,
+                            "safety_checks_passed": True,
+                        },
+                    }
+                }
+            },
+        }
+        output.write_text(yaml.dump(strategy_data, sort_keys=False), encoding="utf-8")
+        click.echo(f"Strategy written to {output.resolve()}")
+    else:
+        click.echo(result.formula)
+    if result.rationale:
+        click.echo(f"Rationale: {result.rationale}")
 
 
 @cli.command()
