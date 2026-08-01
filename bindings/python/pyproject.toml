@@ -40,6 +40,14 @@ src = ["."]
 [tool.ruff.lint.isort]
 known-first-party = ["aureum"]
 
+[tool.mypy]
+python_version = "3.11"
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = ["sklearn.*", "scipy.*", "networkx.*"]
+ignore_missing_imports = true
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["aureum*"]

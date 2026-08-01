@@ -386,16 +386,24 @@ def optimize_min_cvar(
     A_ub[:, n + 1 :] = -np.eye(t)
     b_ub = np.zeros(t)
 
-    bounds = [(0.0, 1.0) for _ in range(n)] + [(None, None)] + [(0.0, None) for _ in range(t)]
+    bounds: list[tuple[float | None, float | None]] = [
+        (0.0, 1.0) for _ in range(n)
+    ] + [(None, None)] + [(0.0, None) for _ in range(t)]
 
     if max_weight is not None:
         for i in range(n):
             current_upper = bounds[i][1]
-            new_upper = min(current_upper, max_weight) if current_upper is not None else max_weight
+            new_upper = (
+                min(current_upper, max_weight)
+                if current_upper is not None
+                else max_weight
+            )
             bounds[i] = (bounds[i][0], new_upper)
     if min_weight is not None:
         for i in range(n):
-            bounds[i] = (max(bounds[i][0], min_weight), bounds[i][1])
+            lower = bounds[i][0]
+            new_lower = max(lower, min_weight) if lower is not None else min_weight
+            bounds[i] = (new_lower, bounds[i][1])
 
     res = linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, bounds=bounds, method="highs")
     if not res.success:

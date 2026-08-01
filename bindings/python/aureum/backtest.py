@@ -900,7 +900,7 @@ class BacktestRunner:
                 for entry in result.rebalance_log
                 if "portfolio" in entry
             ]
-            constraints = {
+            portfolio_constraints = {
                 k: v
                 for k, v in portfolio_spec.items()
                 if k
@@ -918,7 +918,7 @@ class BacktestRunner:
                 "covariance_estimator": portfolio_spec.get("covariance_estimator", "sample"),
                 "risk_free_rate": portfolio_spec.get("risk_free_rate", 0.0),
                 "lookback_days": portfolio_spec.get("lookback_days", 252),
-                "constraints": constraints,
+                "constraints": portfolio_constraints,
                 "causal_graph": portfolio_spec.get("causal_graph"),
                 "causal_separation": portfolio_spec.get("causal_separation"),
             }
@@ -940,7 +940,7 @@ class BacktestRunner:
                 risk_measure=portfolio_spec.get("risk_measure", "variance"),
                 covariance_estimator=portfolio_spec.get("covariance_estimator", "sample"),
                 risk_free_rate=float(portfolio_spec.get("risk_free_rate", 0.0)),
-                constraints=constraints,
+                constraints=portfolio_constraints,
                 weights_history=weights_history,
                 optimization_inputs_hash=_sha256_text(_stable_json(config_for_hash)),
                 causal_graph_hash=causal_graph_hash,
@@ -963,7 +963,8 @@ class BacktestRunner:
                 environment=environment,
             )
 
-            # Edge 3: populate conformal lineage fields from the latest rebalance.
+        # Edge 3: populate conformal lineage fields from the latest rebalance.
+        if portfolio_construction is not None:
             conformal_log = next(
                 (
                     entry
@@ -1169,20 +1170,20 @@ class BacktestRunner:
                 )
                 continue
 
-            entity_id = link.get("entity_id")
+            link_entity_id = link.get("entity_id")
             path = link.get("path")
             relation_value = link.get("relation", Relation.DEPENDS_ON.value)
             relation = Relation(relation_value)
 
-            if entity_id:
-                linked_hashes.append(entity_id)
-                if graph.has_entity(entity_id):
+            if link_entity_id:
+                linked_hashes.append(link_entity_id)
+                if graph.has_entity(link_entity_id):
                     graph.add_relation(
-                        relation, self._strategy_node_id(graph), entity_id
+                        relation, self._strategy_node_id(graph), link_entity_id
                     )
                 else:
                     warnings.warn(
-                        f"metadata.links entity_id '{entity_id}' not present in graph; "
+                        f"metadata.links entity_id '{link_entity_id}' not present in graph; "
                         "recording hash without edge"
                     )
                 continue
