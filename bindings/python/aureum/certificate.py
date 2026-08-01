@@ -177,6 +177,9 @@ class PortfolioConstruction:
     weights_history: list[dict[str, Any]]
     frontier_hash: str = ""
     optimization_inputs_hash: str = ""
+    calibration_set_hash: str = ""
+    coverage_level: float = 0.0
+    prediction_set_width: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         out = {
@@ -191,6 +194,12 @@ class PortfolioConstruction:
             out["frontier_hash"] = self.frontier_hash
         if self.optimization_inputs_hash:
             out["optimization_inputs_hash"] = self.optimization_inputs_hash
+        if self.calibration_set_hash:
+            out["calibration_set_hash"] = self.calibration_set_hash
+        if self.coverage_level:
+            out["coverage_level"] = self.coverage_level
+        if self.prediction_set_width:
+            out["prediction_set_width"] = self.prediction_set_width
         return out
 
 
@@ -282,6 +291,9 @@ class BacktestCertificate:
                 weights_history=pc.get("weights_history", []),
                 frontier_hash=pc.get("frontier_hash", ""),
                 optimization_inputs_hash=pc.get("optimization_inputs_hash", ""),
+                calibration_set_hash=pc.get("calibration_set_hash", ""),
+                coverage_level=pc.get("coverage_level", 0.0),
+                prediction_set_width=pc.get("prediction_set_width", 0.0),
             )
 
         return cls(

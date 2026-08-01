@@ -47,12 +47,17 @@ class Strategy:
             "maximum_sharpe",
             "risk_parity",
             "minimum_cvar",
+            "conformalized_portfolio",
         }:
             errors.append(
                 f"spec.portfolio.objective '{objective}' is not supported; "
                 "supported values: mean_variance, minimum_variance, maximum_sharpe, "
-                "risk_parity, minimum_cvar"
+                "risk_parity, minimum_cvar, conformalized_portfolio"
             )
+
+        if objective == "conformalized_portfolio":
+            self._validate_conformal_portfolio(portfolio, errors)
+
         estimator = portfolio.get("covariance_estimator", "sample")
         if estimator not in {"sample", "ledoit_wolf"}:
             errors.append(
@@ -77,6 +82,56 @@ class Strategy:
             and min_weight > max_weight
         ):
             errors.append("spec.portfolio.min_weight cannot exceed max_weight")
+
+    def _validate_conformal_portfolio(
+        self, portfolio: dict[str, Any], errors: list[str]
+    ) -> None:
+        """Validate the ``spec.portfolio`` block when objective is conformal."""
+        uncertainty = portfolio.get("uncertainty")
+        if not uncertainty:
+            errors.append(
+                "spec.portfolio.uncertainty is required when objective is conformalized_portfolio"
+            )
+            return
+
+        if not isinstance(uncertainty, dict):
+            errors.append("spec.portfolio.uncertainty must be a dict")
+            return
+
+        method = uncertainty.get("method", "conformal_split")
+        if method != "conformal_split":
+            errors.append(
+                f"spec.portfolio.uncertainty.method '{method}' is not supported; "
+                "supported values: conformal_split"
+            )
+
+        coverage = uncertainty.get("coverage", 0.95)
+        if not isinstance(coverage, (int, float)) or not (0.0 < coverage < 1.0):
+            errors.append("spec.portfolio.uncertainty.coverage must be a float in (0, 1)")
+
+        calibration_fraction = uncertainty.get("calibration_fraction", 0.20)
+        if not isinstance(calibration_fraction, (int, float)) or not (
+            0.0 < calibration_fraction < 1.0
+        ):
+            errors.append(
+                "spec.portfolio.uncertainty.calibration_fraction must be a float in (0, 1)"
+            )
+
+        base_objective = portfolio.get("base_objective")
+        if not base_objective:
+            errors.append(
+                "spec.portfolio.base_objective is required when objective is conformalized_portfolio"
+            )
+        elif base_objective not in {
+            "mean_variance",
+            "minimum_variance",
+            "maximum_sharpe",
+            "risk_parity",
+        }:
+            errors.append(
+                f"spec.portfolio.base_objective '{base_objective}' is not supported; "
+                "supported values: mean_variance, minimum_variance, maximum_sharpe, risk_parity"
+            )
 
     def validate(self) -> list[str]:
         """Return a list of validation errors, empty if valid."""

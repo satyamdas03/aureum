@@ -204,6 +204,33 @@ and a future phase will connect them to a full proof of the execution itself.
 A fully formal proof of the runner's correctness (and cryptographic signing of
 certificates) remains on the roadmap.
 
+## Edge 3: conformal portfolio lineage
+
+When a strategy uses `objective: conformalized_portfolio`, the certificate
+records the conformal pipeline in `portfolio_construction`:
+
+- `calibration_set_hash`: SHA-256 of the exact calibration return matrix used.
+- `coverage_level`: the declared marginal coverage target (e.g., `0.95`).
+- `prediction_set_width`: the mean per-asset interval width at the latest
+  rebalance, giving an auditor a compact view of how conservative the return
+  assumptions were.
+
+The `execution_trace.rebalance_log` also includes a `conformal` block on each
+rebalance:
+
+```json
+{
+  "coverage": 0.95,
+  "calibration_fraction": 0.20,
+  "mean_width": 0.0123,
+  "lower_bounds": {"AAPL": -0.0112, ...},
+  "upper_bounds": {"AAPL": 0.0135, ...}
+}
+```
+
+Together these fields make the uncertainty quantification around expected
+returns explicit and reproducible, not hidden inside a point forecast.
+
 ## Phase 3: AI authoring and reflection
 
 ### Generate strategies from natural language
