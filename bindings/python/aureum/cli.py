@@ -8,12 +8,12 @@ import tarfile
 from pathlib import Path
 
 import click
-
-from .adapter import AlpacaAdapter
-from .author import StrategyAuthor
 import yaml
 
+from .adapter import AlpacaAdapter
 from .alpha import AlphaGrammar, AlphaMiner, safety_check
+from .author import StrategyAuthor
+
 from .backtest import BacktestRunner, MarketData
 from .certificate import get_environment, hash_file
 from .diffopt import DifferentiableSharpeOptimizer, _find_repo_root  # noqa: F401
@@ -254,6 +254,11 @@ def reflect(
     help="Output Lean 4 verifier theorem file path",
 )
 @click.option(
+    "--economic-security",
+    is_flag=True,
+    help="Run the economic-security audit (uses default config if not in YAML)",
+)
+@click.option(
     "--graph",
     type=click.Choice(["none", "inline", "bundle"], case_sensitive=False),
     default="none",
@@ -268,6 +273,7 @@ def backtest(
     bundle: Path | None,
     smt: Path | None,
     lean: Path | None,
+    economic_security: bool,
     graph: str,
 ) -> None:
     """Run a deterministic backtest for a strategy."""
@@ -279,6 +285,16 @@ def backtest(
             click.echo(f"  - {error}")
         raise click.Abort()
 
+    if graph not in {"none", "inline", "bundle"}:
+        click.echo(
+            f"Error: --graph must be one of none, inline, bundle; got '{graph}'"
+        )
+        raise click.Abort()
+
+    graph_persistence = strategy.graph_persistence()
+    if graph != "none":
+        graph_persistence = graph
+
     data_source = str(data) if data else "synthetic"
     click.echo(f"Running backtest for '{strategy.metadata['name']}'...")
     click.echo(f"Data source: {data_source}")
@@ -286,10 +302,6 @@ def backtest(
     if data is None:
         click.echo("Error: --data is required for real backtests in this version.")
         raise click.Abort()
-
-    graph_persistence = strategy.graph_persistence()
-    if graph != "none":
-        graph_persistence = graph
 
     market_data = MarketData.from_csv(data)
     runner = BacktestRunner(
@@ -302,11 +314,14 @@ def backtest(
 
     if certificate or bundle or smt or lean or graph_persistence in {"inline", "bundle"}:
         env = get_environment(aureum_version=__version__, cwd=path.parent)
+        contract_paths: list[tuple[str, str]] = []
         cert = runner.build_certificate(
             strategy_path=path,
             data_path=data,
             environment=env,
+            economic_security=economic_security,
             graph_persistence=graph_persistence,
+            contract_paths=contract_paths,
         )
         cert_json = cert.to_json(indent=2)
         cert_dict = cert.to_dict()

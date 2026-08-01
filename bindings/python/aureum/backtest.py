@@ -11,6 +11,7 @@ import csv
 import datetime as dt
 import itertools
 import math
+import warnings
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -38,6 +39,7 @@ from aureum.certificate import (
 )
 from aureum.conformal import optimize_conformalized_portfolio
 from aureum.diffopt import DifferentiableSharpeOptimizer
+from aureum.econsec import EconomicSecurityReport, audit_economic_security
 from aureum.graph import EntityType, KnowledgeGraph, Relation
 from aureum.mpt import (
     OptimizationInputs,
@@ -141,10 +143,28 @@ def _mean_reversion_5_20(closes: list[float]) -> float:
     return (recent[-1] - mean) / std
 
 
+def _estimate_conditional_covariance(
+    returns_arr: np.ndarray,
+    symbols: list[str],
+    portfolio_spec: dict[str, Any],
+) -> tuple[np.ndarray, dict[str, Any] | None]:
+    """Return the covariance matrix to use, optionally conditioned on drivers."""
+    covariance_estimator = portfolio_spec.get("covariance_estimator", "sample")
+    if not portfolio_spec.get("causal_graph"):
+        return estimate_covariance(returns_arr, estimator=covariance_estimator), None
+
+
+    graph = CausalGraph.from_portfolio_spec(portfolio_spec)
+    separation = CausalSeparationSpec.from_portfolio_spec(portfolio_spec)
+    assert separation is not None, "causal_graph requires causal_separation"
+    cov, causal_meta = condition_covariance(returns_arr, symbols, graph, separation)
+    return cov, causal_meta
+
+
 # Registry of named signals referenced by ``spec.ranking.by``.
 # Every signal function receives the price history *and* volume history up to the
 # current bar so neuro-symbolic alphas can use both close and volume primitives.
-_SIGNALS: dict[str, Callable[[list[float], list[int]], float]] = {
+_SIGNALS: dict[str, Callable[[list[float], list[float]], float]] = {
     "momentum_12_1": lambda closes, _volumes: _momentum_12_1(closes),
     "volatility_20d": lambda closes, _volumes: _volatility_20d(closes),
     "sharpe_63d": lambda closes, _volumes: _sharpe_63d(closes),
@@ -221,11 +241,11 @@ class MarketData:
                 break
         return out
 
-    def volumes_up_to(self, date: dt.date, symbol: str) -> list[int]:
+    def volumes_up_to(self, date: dt.date, symbol: str) -> list[float]:
         out = []
         for rec in self._by_symbol.get(symbol, []):
             if rec["date"] <= date:
-                out.append(rec["volume"])
+                out.append(float(rec["volume"]))
             else:
                 break
         return out
@@ -309,19 +329,28 @@ class BacktestRunner:
         self.initial_nav = initial_nav
         self.strategy_path = Path(strategy_path) if strategy_path else None
         self._diffopt: DifferentiableSharpeOptimizer | None = None
+        portfolio_spec = self.strategy.portfolio()
+        if (
+            portfolio_spec is not None
+            and portfolio_spec.get("objective") == "differentiable_sharpe"
+            and self.strategy_path is not None
+        ):
+            self._diffopt = DifferentiableSharpeOptimizer.from_strategy(
+                self.strategy, self.data, strategy_path=self.strategy_path
+            )
 
     def _build_signal_registry(
         self,
-    ) -> dict[str, Callable[[list[float], list[int]], float]]:
+    ) -> dict[str, Callable[[list[float], list[float]], float]]:
         """Build a per-runner signal registry from built-ins and formula signals."""
 
-        def _make_evaluator(node: Any) -> Callable[[list[float], list[int]], float]:
-            def _eval(closes: list[float], volumes: list[int]) -> float:
+        def _make_evaluator(node: Any) -> Callable[[list[float], list[float]], float]:
+            def _eval(closes: list[float], volumes: list[float]) -> float:
                 return float(node.evaluate(closes, volumes)[-1])
 
             return _eval
 
-        registry = dict(_SIGNALS)
+        registry: dict[str, Callable[[list[float], list[float]], float]] = dict(_SIGNALS)
         signals = self.strategy.spec.get("signals", {})
         if isinstance(signals, dict):
             for name, signal in signals.items():
@@ -338,23 +367,6 @@ class BacktestRunner:
                     )
                 registry[name] = _make_evaluator(ast)
         return registry
-
-    def _build_alpha_lineage(self) -> AlphaLineage | None:
-        """Capture alpha lineage for neuro-symbolic signals."""
-        signals = self.strategy.spec.get("signals", {})
-        alpha_signals: list[dict[str, Any]] = []
-        if isinstance(signals, dict):
-            for name, signal in signals.items():
-                if signal.get("type") != "neuro_symbolic":
-                    continue
-                alpha_signals.append(
-                    {
-                        "name": name,
-                        "formula": signal.get("formula", ""),
-                        "generation": signal.get("generation", {}),
-                    }
-                )
-        return AlphaLineage(alpha_signals=alpha_signals) if alpha_signals else None
 
     def run(self) -> BacktestResult:
         spec = self.strategy.spec
@@ -555,17 +567,25 @@ class BacktestRunner:
         if len(dates) <= lookback_days:
             return set()
 
-        if frequency != "1M":
-            raise ValueError(f"unsupported rebalance frequency: {frequency!r}")
-
         eligible = dates[lookback_days:]
         rebalance_dates: set[dt.date] = set()
-        prev_month: tuple[int, int] | None = None
-        for date in eligible:
-            month_key = (date.year, date.month)
-            if month_key != prev_month:
-                rebalance_dates.add(date)
-                prev_month = month_key
+
+        if frequency == "1M":
+            prev_month: tuple[int, int] | None = None
+            for date in eligible:
+                month_key = (date.year, date.month)
+                if month_key != prev_month:
+                    rebalance_dates.add(date)
+                    prev_month = month_key
+        elif frequency == "1Y":
+            prev_year: int | None = None
+            for date in eligible:
+                if date.year != prev_year:
+                    rebalance_dates.add(date)
+                    prev_year = date.year
+        else:
+            raise ValueError(f"unsupported rebalance frequency: {frequency!r}")
+
         return rebalance_dates
 
     def _portfolio_target_values(
@@ -702,35 +722,9 @@ class BacktestRunner:
             return target_values, conformal_meta
 
         mu = estimate_mean_returns(returns_arr, method="sample")
-        cov = estimate_covariance(returns_arr, estimator=covariance_estimator)
-
-        causal_meta: dict[str, object] | None = None
-        causal_graph_hash = ""
-        if portfolio_spec.get("causal_graph"):
-            graph = CausalGraph.from_portfolio_spec(portfolio_spec)
-            graph_errors = graph.validate(symbols)
-            if graph_errors:
-                return {}, {
-                    "objective": objective,
-                    "error": "causal graph validation failed",
-                    "causal_graph_errors": graph_errors,
-                    "eligible_count": len(symbols),
-                }
-            separation = CausalSeparationSpec.from_portfolio_spec(portfolio_spec)
-            if separation is None:
-                return {}, {
-                    "objective": objective,
-                    "error": "causal_graph requires causal_separation",
-                    "eligible_count": len(symbols),
-                }
-            cov, causal_meta = condition_covariance(
-                returns_arr, symbols, graph, separation
-            )
-            from aureum.certificate import _sha256_text, _stable_json
-
-            causal_graph_hash = _sha256_text(
-                _stable_json(portfolio_spec.get("causal_graph"))
-            )
+        cov, causal_meta = _estimate_conditional_covariance(
+            returns_arr, symbols, portfolio_spec
+        )
 
         inputs = OptimizationInputs(
             expected_returns=mu,
@@ -802,9 +796,15 @@ class BacktestRunner:
             },
         }
         if causal_meta is not None:
-            meta["causal"] = causal_meta
-        if causal_graph_hash:
-            meta["causal_graph_hash"] = causal_graph_hash
+            meta["causal"] = {
+                "selected_drivers": causal_meta["selected_drivers"],
+                "driver_r2": causal_meta["driver_r2"],
+                "betas": causal_meta["betas"],
+                "conditional_covariance_hash": causal_meta[
+                    "conditional_covariance_hash"
+                ],
+            }
+            meta["covariance_estimator"] = f"{covariance_estimator}+causal_conditioned"
         return target_values, meta
 
     def _eligible_universe(
@@ -918,14 +918,36 @@ class BacktestRunner:
         data_path: str | Path,
         environment: Environment,
         *,
+        economic_security: bool | dict[str, Any] | None = None,
         graph_persistence: str = "none",
+        contract_paths: list[tuple[str, str]] | None = None,
     ) -> BacktestCertificate:
-        """Run the backtest and wrap the result in an Aureum Backtest Certificate."""
+        """Run the backtest and wrap the result in an Aureum Backtest Certificate.
+
+        Edge 5: ``graph_persistence`` controls whether a semantic knowledge graph
+        is built and attached to the certificate.  ``contract_paths`` is an
+        optional list of ``(path, kind)`` tuples (e.g. ``("risk.smt2", "smt2")``)
+        that will be represented as contract nodes in the graph.
+        """
         from aureum.certificate import (
             ExecutionSummary,
             PortfolioConstruction,
             Results,
         )
+
+        strategy_path = Path(strategy_path)
+        data_path = Path(data_path)
+
+        # Edge 6: ensure the differentiable optimizer is instantiated before the run.
+        portfolio_spec = self.strategy.portfolio()
+        if (
+            portfolio_spec is not None
+            and portfolio_spec.get("objective") == "differentiable_sharpe"
+            and self._diffopt is None
+        ):
+            self._diffopt = DifferentiableSharpeOptimizer.from_strategy(
+                self.strategy, self.data, strategy_path=strategy_path
+            )
 
         result = self.run()
         constraints = self.strategy.constraints()
@@ -936,9 +958,6 @@ class BacktestRunner:
             turnover_annual=result.turnover_annual,
             concentration_single_name=result.max_concentration,
         )
-
-        strategy_path = Path(strategy_path)
-        data_path = Path(data_path)
 
         inputs = Inputs(
             strategy=InputLineage(
@@ -1034,9 +1053,18 @@ class BacktestRunner:
                 if h:
                     conditional_covariance_hash = h
                     break
-            causal_graph_hash = _sha256_text(
-                _stable_json(portfolio_spec.get("causal_graph"))
-            ) if portfolio_spec.get("causal_graph") else ""
+            causal_graph_hash = ""
+            if portfolio_spec.get("causal_graph"):
+                causal_graph_hash = _sha256_text(
+                    _stable_json(
+                        {
+                            "causal_graph": portfolio_spec["causal_graph"],
+                            "causal_separation": portfolio_spec.get(
+                                "causal_separation", {}
+                            ),
+                        }
+                    )
+                )
 
             portfolio_construction = PortfolioConstruction(
                 objective=portfolio_spec["objective"],
@@ -1063,22 +1091,6 @@ class BacktestRunner:
                     self._diffopt.split_hashes
                 )
 
-        # Edge 5: build optional semantic knowledge graph.
-        knowledge_graph: KnowledgeGraph | None = None
-        graph_node_id: str | None = None
-        linked_entity_hashes: list[str] = []
-        if graph_persistence in {"inline", "bundle"}:
-            knowledge_graph, graph_node_id, linked_entity_hashes = self._build_knowledge_graph(
-                strategy_path=strategy_path,
-                data_path=data_path,
-                inputs=inputs,
-                execution=execution,
-                results=results,
-                portfolio_construction=portfolio_construction,
-                result=result,
-                environment=environment,
-            )
-
         # Edge 3: populate conformal lineage fields from the latest rebalance.
         if portfolio_construction is not None:
             conformal_log = next(
@@ -1099,7 +1111,52 @@ class BacktestRunner:
                     "mean_prediction_set_width", 0.0
                 )
 
-        # Edge 4: capture neuro-symbolic alpha signal lineage.
+        economic_security_report: EconomicSecurityReport | None = None
+        audit_spec = self.strategy.spec.get("audit", {})
+        yaml_enabled = bool(audit_spec.get("economic_security", False))
+        yaml_config = audit_spec.get("economic_security_config")
+
+        if economic_security is None:
+            enabled = yaml_enabled
+            config = yaml_config
+        elif economic_security is True:
+            enabled = True
+            config = yaml_config
+        elif isinstance(economic_security, dict):
+            enabled = True
+            config = economic_security
+        else:
+            enabled = False
+            config = None
+
+        if enabled:
+            economic_security_report = audit_economic_security(
+                result, self.data, config
+            )
+
+        # Edge 5: build optional semantic knowledge graph.
+        graph_node_id: str | None = None
+        linked_entity_hashes: list[str] = []
+        knowledge_graph: KnowledgeGraph | None = None
+
+        if graph_persistence in {"inline", "bundle"}:
+            knowledge_graph, graph_node_id = self._build_knowledge_graph(
+                strategy_path=strategy_path,
+                data_path=data_path,
+                inputs=inputs,
+                execution=execution,
+                results=results,
+                portfolio_construction=portfolio_construction,
+                portfolio_spec=portfolio_spec,
+                result=result,
+                environment=environment,
+                contract_paths=contract_paths,
+            )
+            linked_entity_hashes = self._resolve_links(
+                knowledge_graph,
+                strategy_path.parent,
+            )
+
         alpha_lineage = self._build_alpha_lineage()
 
         certificate = BacktestCertificate.from_run(
@@ -1110,6 +1167,7 @@ class BacktestRunner:
             risk_constraints=risk_results,
             execution_trace=execution_trace,
             portfolio_construction=portfolio_construction,
+            economic_security=economic_security_report,
             graph_node_id=graph_node_id,
             linked_entity_hashes=linked_entity_hashes,
             knowledge_graph=knowledge_graph,
@@ -1122,6 +1180,44 @@ class BacktestRunner:
 
         return certificate
 
+    def _build_alpha_lineage(self) -> AlphaLineage | None:
+        """Build ``AlphaLineage`` for neuro-symbolic signals used in the backtest."""
+        signals = self.strategy.spec.get("signals", {})
+        if not signals:
+            return None
+
+        alpha_signals: list[dict[str, Any]] = []
+        if isinstance(signals, dict):
+            items = list(signals.items())
+        elif isinstance(signals, list):
+            items = [(s.get("name", ""), s) for s in signals]
+        else:
+            return None
+
+        for name, signal in items:
+            if not isinstance(signal, dict):
+                continue
+            if signal.get("type") != "neuro_symbolic":
+                continue
+            formula = signal.get("formula")
+            if not formula:
+                continue
+            generation = signal.get("generation", {})
+            alpha_signals.append(
+                {
+                    "name": name,
+                    "formula": formula,
+                    "description": signal.get("description", ""),
+                    "safety_checks_passed": bool(
+                        generation.get("safety_checks_passed", False)
+                    ),
+                    "generation_prompt_hash": generation.get("prompt_hash", ""),
+                    "model": generation.get("model", generation.get("llm_model", "")),
+                }
+            )
+
+        return AlphaLineage(alpha_signals=alpha_signals) if alpha_signals else None
+
     def _build_knowledge_graph(
         self,
         *,
@@ -1131,10 +1227,12 @@ class BacktestRunner:
         execution: ExecutionSummary,
         results: Results,
         portfolio_construction: PortfolioConstruction | None,
+        portfolio_spec: dict[str, Any] | None,
         result: BacktestResult,
         environment: Environment,
-    ) -> tuple[KnowledgeGraph, str, list[str]]:
-        """Construct the semantic knowledge graph for this backtest run."""
+        contract_paths: list[tuple[str, str]] | None,
+    ) -> tuple[KnowledgeGraph, str]:
+        """Construct a semantic knowledge graph for this backtest run."""
         from aureum.certificate import _sha256_text, _stable_json
 
         graph = KnowledgeGraph()
@@ -1146,7 +1244,9 @@ class BacktestRunner:
             "spec": self.strategy.spec,
         }
         strategy_node = graph.add_entity(
-            EntityType.STRATEGY, strategy_payload, source_path=str(strategy_path)
+            EntityType.STRATEGY,
+            strategy_payload,
+            source_path=str(strategy_path),
         )
 
         data_payload = {
@@ -1157,7 +1257,9 @@ class BacktestRunner:
             "end_date": result.end_date,
         }
         data_node = graph.add_entity(
-            EntityType.DATA_SNAPSHOT, data_payload, source_path=str(data_path)
+            EntityType.DATA_SNAPSHOT,
+            data_payload,
+            source_path=str(data_path),
         )
 
         signal_nodes: list[Any] = []
@@ -1171,7 +1273,7 @@ class BacktestRunner:
 
         risk_model_node: Any | None = None
         portfolio_recipe_node: Any | None = None
-        if portfolio_construction is not None:
+        if portfolio_spec and portfolio_construction is not None:
             risk_model_payload = {
                 "objective": portfolio_construction.objective,
                 "risk_measure": portfolio_construction.risk_measure,
@@ -1230,6 +1332,22 @@ class BacktestRunner:
         }
         cert_node = graph.add_entity(EntityType.CERTIFICATE, certificate_payload)
 
+        contract_paths = contract_paths or []
+        for path, kind in contract_paths:
+            contract_payload = {
+                "path": str(Path(path).name),
+                "sha256": hash_file(path),
+                "kind": kind,
+            }
+            contract_node = graph.add_entity(
+                EntityType.CONTRACT,
+                contract_payload,
+                source_path=str(path),
+            )
+            graph.add_relation(
+                Relation.DERIVED_FROM, cert_node.entity_id, contract_node.entity_id
+            )
+
         graph.add_relation(
             Relation.BACKTEST_INPUT, cert_node.entity_id, strategy_node.entity_id
         )
@@ -1256,13 +1374,7 @@ class BacktestRunner:
                 Relation.BACKTEST_OUTPUT, run_node.entity_id, position_node.entity_id
             )
 
-        linked_hashes = self._resolve_links(graph, strategy_path.parent)
-        for linked_id in linked_hashes:
-            graph.add_relation(
-                Relation.DEPENDS_ON, strategy_node.entity_id, linked_id
-            )
-
-        return graph, cert_node.entity_id, linked_hashes
+        return graph, cert_node.entity_id
 
     def _resolve_links(
         self,
@@ -1270,24 +1382,20 @@ class BacktestRunner:
         strategy_dir: Path,
     ) -> list[str]:
         """Resolve ``metadata.links`` to entity IDs and add edges to the graph."""
-        import warnings
 
         linked_hashes: list[str] = []
         for link in self.strategy.links():
             if isinstance(link, str):
                 entity_id = link
+                relation = Relation.DEPENDS_ON
+                linked_hashes.append(entity_id)
                 if graph.has_entity(entity_id):
-                    graph.add_relation(
-                        Relation.DEPENDS_ON,
-                        self._strategy_node_id(graph),
-                        entity_id,
-                    )
+                    graph.add_relation(relation, self._strategy_node_id(graph), entity_id)
                 else:
                     warnings.warn(
                         f"metadata.links entity_id '{entity_id}' not present in graph; "
                         "recording hash without edge"
                     )
-                linked_hashes.append(entity_id)
                 continue
 
             if not isinstance(link, dict):
@@ -1296,17 +1404,15 @@ class BacktestRunner:
                 )
                 continue
 
-            link_entity_id = link.get("entity_id")
-            path = link.get("path")
-            relation_value = link.get("relation", Relation.DEPENDS_ON.value)
+            link_entity_id: Any | None = link.get("entity_id")
+            path: Any | None = link.get("path")
+            relation_value: Any = link.get("relation", Relation.DEPENDS_ON.value)
             relation = Relation(relation_value)
 
             if link_entity_id:
                 linked_hashes.append(link_entity_id)
                 if graph.has_entity(link_entity_id):
-                    graph.add_relation(
-                        relation, self._strategy_node_id(graph), link_entity_id
-                    )
+                    graph.add_relation(relation, self._strategy_node_id(graph), link_entity_id)
                 else:
                     warnings.warn(
                         f"metadata.links entity_id '{link_entity_id}' not present in graph; "

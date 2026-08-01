@@ -259,6 +259,144 @@ rebalance:
 Together these fields make the uncertainty quantification around expected
 returns explicit and reproducible, not hidden inside a point forecast.
 
+## Edge 2: causal lineage
+
+When a strategy declares a `causal_graph`, the certificate records the declared
+causal model and the conditional covariance used at the first rebalance:
+
+- `causal_graph_hash`: SHA-256 of the declared graph plus separation spec.
+- `conditional_covariance_hash`: SHA-256 of the `N x N` matrix fed to the
+  optimizer at the first rebalance.
+- `execution_trace.rebalance_log[].portfolio.causal`: per-rebalance metadata
+  including selected drivers, driver R² values, and per-asset betas.
+
+A validator can re-run the same strategy and data, reproduce the driver
+projection and residual covariance, and confirm that the reported conditional
+covariance hash matches.
+
+## Edge 5: Semantic knowledge graph
+
+A certificate proves *that* a result was produced; the semantic knowledge graph
+explains *how* the result relates to every other artifact in the investment
+process.  Edge 5 content-addresses strategies, data snapshots, signals, risk
+models, portfolio recipes, position sets, certificates, and prover contracts,
+then links them with typed edges.
+
+Run a backtest with `--graph inline` to embed the graph in the certificate:
+
+```bash
+aureum backtest examples/strategies/linked_strategy.yaml \
+  --data examples/data/synthetic_prices.csv \
+  --certificate certificate.json \
+  --graph inline
+```
+
+The certificate gains:
+
+- `graph_node_id` — the content-addressed ID of the certificate node.
+- `linked_entity_hashes` — entity IDs declared in `metadata.links`.
+- `knowledge_graph` — the full graph with entities and relations.
+
+Query the graph programmatically:
+
+```python
+from aureum.certificate import BacktestCertificate
+
+raw = Path("certificate.json").read_text(encoding="utf-8")
+cert = BacktestCertificate.from_dict(json.loads(raw))
+upstream = cert.knowledge_graph.walk_upstream(cert.graph_node_id, depth=1)
+for entity in upstream:
+    print(entity.entity_type.value, entity.entity_id)
+```
+
+Use `--graph bundle` to write a `certificate.graph.json` sidecar instead of
+inlining it.  Set `spec.audit.graph_persistence: none` to disable the graph
+entirely.
+
+## Edge 6: Differentiable certifiable execution
+
+A learned allocation policy can be trained by gradient descent and still emit
+the same content-addressed certificate as a classical optimizer.  The
+`differentiable_sharpe` objective records:
+
+- `model_architecture_hash` — SHA-256 of the model architecture YAML.
+- `weights_hash` — SHA-256 of the trained `.npz` weights.
+- `train_val_test_split_hashes` — SHA-256 of each chronological data split.
+
+The reproducibility bundle includes the architecture file and the trained
+weights, so a validator can re-run the exact same model and confirm the
+reported P&L.  Because gradient-based training is slightly less deterministic
+than closed-form MPT optimizers, the certificate tolerance for diffopt runs
+is relaxed to `1e-5 relative + 1e-8 absolute`.
+
+```bash
+aureum backtest examples/strategies/diffopt_sharpe.yaml \
+  --data examples/data/synthetic_prices.csv \
+  --certificate diffopt.json \
+  --bundle diffopt-run.tar.gz
+```
+
+## Edge 7: economic-security audit
+
+Rebalancing rules are often public or leakable. Edge 7 adds a mechanical
+adversarial audit to the certificate: it replays the backtest from the
+perspective of an attacker who knows the schedule one day in advance,
+measures the profit they can extract, and reports that value as a first-class
+certificate metric.
+
+Enable it in the strategy YAML:
+
+```yaml
+audit:
+  economic_security: true
+```
+
+Or pass the flag at the CLI when the strategy omits the block:
+
+```bash
+aureum backtest examples/strategies/momentum.yaml \
+  --data examples/data/synthetic_prices.csv \
+  --certificate certificate.json \
+  --economic-security
+```
+
+When enabled, the certificate gains an `economic_security` block:
+
+```json
+{
+  "economic_security": {
+    "enabled": true,
+    "extractable_value_estimate_bps": 12.3,
+    "attack_vectors_found": [
+      {
+        "vector": "front_run",
+        "symbol": "AAPL",
+        "rebalance_date": "2023-02-01",
+        "profit_bps": 4.1,
+        "notional": 150000.0
+      }
+    ],
+    "schedule_entropy_bits": 2.71,
+    "replay_inputs_hash": "sha256:...",
+    "config": {
+      "front_run_advance_days": 1,
+      "adversary_cost_model": {
+        "slippage": 0.001,
+        "borrow_cost_annual": 0.03,
+        "max_participation_rate": 0.10
+      }
+    }
+  }
+}
+```
+
+`extractable_value_estimate_bps` is a conservative upper bound on the alpha an
+adversary could harvest through front-running, delayed arbitrage, or liquidity
+squeezes.  `schedule_entropy_bits` reports how predictable the
+`(rebalance_date, symbol, sign)` triples are — higher entropy means a less
+exploitable schedule.  The determinism block gains an additional
+`economic_security_hash` so a validator can re-run only the audit and compare.
+
 ## Phase 3: AI authoring and reflection
 
 ### Generate strategies from natural language
@@ -319,32 +457,29 @@ aureum alpha "sma(close, 20) / close" --validate-only
 The safety checker rejects unknown functions, negative lags, stochastic
 primitives, and price-level constants.  When the backtest certificate is
 emitted, the alpha lineage is included so reviewers can reconstruct exactly
-which signal was evaluated on each bar.
+which signal was evaluated on each bar:
 
-## Edge 6: Differentiable certifiable execution
-
-When a strategy uses `spec.portfolio.objective: differentiable_sharpe`, the
-certificate records the full learned lineage of the model:
-
-- `model_architecture_hash` — SHA-256 of the model architecture YAML.
-- `weights_hash` — SHA-256 of the trained `trained_weights.npz`.
-- `train_val_test_split_hashes` — SHA-256 of each chronological data split.
-
-Because gradient-based training is slightly less deterministic than closed-form
-MPT optimizers, the certificate tolerance for diffopt runs is relaxed to
-`1e-5 relative + 1e-8 absolute`.  Reproducibility is still guaranteed because
-the JAX PRNG key is seeded from the SHA-256 of the strategy, architecture, and
-train split bytes.
-
-```bash
-aureum backtest examples/strategies/diffopt_sharpe.yaml \
-  --data examples/data/synthetic_prices.csv \
-  --certificate diffopt.json \
-  --bundle diffopt-run.tar.gz
+```json
+{
+  "alpha_lineage": {
+    "alpha_signals": [
+      {
+        "name": "alpha",
+        "formula": "if_else(gt(dollar_volume(close, volume, 20), 5_000_000.0), zscore(returns(close, 5), 63), 0.0)",
+        "description": "5-day return z-score, only computed for liquid names",
+        "safety_checks_passed": true,
+        "generation_prompt_hash": "sha256:...",
+        "model": "claude-sonnet-5"
+      }
+    ]
+  }
+}
 ```
 
-The bundle includes `model_architecture.yaml` and `trained_weights.npz` so a
-validator can reconstruct the exact trained policy.
+Because formula evaluation is deterministic, a validator can re-run the exact
+formula on the bundled CSV and compare the scores recorded in
+``execution_trace.rebalance_log``.  If ``safety_checks_passed`` is false, the
+strategy YAML is invalid and the certificate must be marked non-compliant.
 
 ## Next steps
 

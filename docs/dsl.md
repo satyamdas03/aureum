@@ -28,11 +28,13 @@ spec:
 | `name` | string | Unique identifier |
 | `description` | string | Human-readable intent |
 | `tags` | list | Search/discovery tags |
-| `links` | list | Optional lineage links to external entities (Edge 5) |
+| `links` | list | Semantic knowledge graph lineage links (Edge 5) |
 
 ### `metadata.links`
 
-Declare explicit content-addressed lineage before a backtest runs.
+Declare explicit lineage links from this strategy to other Aureum entities.
+Each entry is either a plain entity ID string or an object with `entity_id` or
+`path`, plus optional `type` and `relation`.
 
 ```yaml
 metadata:
@@ -49,6 +51,11 @@ metadata:
       relation: backtest_input
       path: examples/data/synthetic_prices.csv
 ```
+
+Plain entries are treated as untyped `depends_on` links.  Object entries must
+have either `entity_id` or `path`, and may specify `type` and `relation`.
+`relation` must be one of the values in `aureum.graph.Relation` and `type`
+must be one of the values in `aureum.graph.EntityType`.
 
 See [Edge 5 — Semantic Knowledge Graph](./superpowers/edges/edge-05-semantic-graph.md)
 for the entity/relation model and persistence modes.
@@ -106,11 +113,37 @@ ranking:
   ascending: false
 ```
 
-Supported primitives include `close`, `volume`, `returns`, `lag`, `sma`,
-`ema`, `volatility`, `momentum`, `zscore`, `rsi`, `ts_argmax`, `ts_argmin`,
-`dollar_volume`, `vwma`, arithmetic operators, comparisons, and `if_else`.
-The safety checker rejects unknown functions, look-ahead (negative lags),
- stochastic primitives, and structural constants such as literal prices.
+Supported primitives:
+
+| Primitive | Signature | Meaning |
+|---|---|---|
+| ``close`` / ``volume`` | variable | current bar value |
+| ``ts_lag(x, n)`` | series, int > 0 | value ``n`` bars ago |
+| ``returns(x, n)`` | series, int > 0 | ``x / ts_lag(x, n) - 1`` |
+| ``sma(x, n)`` / ``ema(x, n)`` | series, int > 0 | trailing mean / EMA |
+| ``ts_std(x, n)`` | series, int > 0 | trailing sample std |
+| ``zscore(x, n)`` | series, int > 0 | z-score over trailing window |
+| ``ts_rank(x, n)`` | series, int > 0 | percentile rank in window |
+| ``ts_min(x, n)`` / ``ts_max(x, n)`` | series, int > 0 | trailing min / max |
+| ``add`` / ``sub`` / ``mul`` / ``div`` | two arguments | arithmetic |
+| ``abs(x)`` / ``sign(x)`` | one argument | absolute value / sign |
+| ``if_else(cond, a, b)`` | three arguments | conditional selection |
+| ``dollar_volume(close, volume, n)`` | variables, int > 0 | trailing dollar volume |
+
+Validation rules:
+
+- ``formula`` must parse and validate against ``AlphaGrammar.default()``.
+- Every signal referenced by ``spec.ranking.by`` must be a built-in signal or a
+  signal defined in ``spec.signals``.
+- If ``generation`` is present, ``safety_checks_passed`` is required and must be
+  a boolean.
+
+Use the CLI to generate or validate a formula signal:
+
+```bash
+aureum alpha "Build a mean-reversion-safe momentum factor" --name momentum_safe
+aureum alpha "sub(returns(close, 252), returns(close, 21))" --validate-only
+```
 
 ## Risk
 
@@ -159,6 +192,54 @@ Validation rules:
 - `spec.portfolio.uncertainty.calibration_fraction` must be a float in `(0, 1)`; default `0.20`.
 - `spec.portfolio.base_objective` is required and must be one of `mean_variance`, `minimum_variance`, `maximum_sharpe`, or `risk_parity`.
 
+### Causal MPT (Edge 2)
+
+Declare latent macro drivers and the assets they influence.  Aureum builds the
+ drivers from proxy returns or from the first principal component of the child
+assets, estimates per-asset exposures, and conditions the covariance matrix on the
+selected drivers before optimization.  This removes shared macro correlation
+from the risk estimate while leaving the expected-return estimate unchanged.
+
+```yaml
+portfolio:
+  objective: minimum_variance
+  covariance_estimator: sample
+  lookback_days: 252
+  causal_graph:
+    drivers:
+      - name: liquidity_factor
+        proxies: [SHV]
+      - name: inflation_factor
+        proxies: [TIP, GLD]
+    edges:
+      - from: liquidity_factor
+        to: [AAPL, MSFT, NVDA, GOOGL]
+      - from: inflation_factor
+        to: [XOM, CVX]
+  causal_separation:
+    mode: condition_on
+    drivers: [liquidity_factor]
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `causal_graph` | object | No | Declared DAG of latent drivers and asset children. Required if `causal_separation` is present. |
+| `causal_graph.drivers` | list | Yes (if graph present) | Latent drivers. Each must have a unique `name`. |
+| `causal_graph.drivers[].proxies` | list[str] | No | Observed symbols whose equal-weighted returns proxy the driver. |
+| `causal_graph.edges` | list | Yes (if graph present) | Directed edges `from` a driver `to` affected assets. |
+| `causal_separation` | object | Yes (if graph present) | Controls which drivers are conditioned out. |
+| `causal_separation.mode` | string | Yes | `condition_on` or `auto`. |
+| `causal_separation.drivers` | list[str] | Yes when `mode == condition_on` | Driver names to remove from covariance. |
+| `causal_separation.auto_r2_threshold` | float | No | R² threshold for `auto` mode; default `0.10`. |
+
+Validation rules:
+
+- Driver names must be unique.
+- Every `edges[].from` must be a declared driver.
+- Every `edges[].to` must be present in the optimization universe.
+- The graph must be acyclic; an asset listed as a driver creates a cycle and is rejected.
+- `causal_separation.drivers` must reference declared drivers.
+
 ## Audit
 
 ```yaml
@@ -167,6 +248,77 @@ audit:
   deterministic: true
   deterministic_seed: 42
   graph_persistence: inline   # none | inline | bundle (Edge 5)
+```
+
+`graph_persistence` controls how the Edge 5 semantic knowledge graph is emitted:
+
+| Value | Behavior |
+|---|---|
+| `none` | Do not emit graph nodes (default). |
+| `inline` | Embed the graph as `knowledge_graph` inside the certificate JSON. |
+| `bundle` | Write a `certificate.graph.json` sidecar and reference it. |
+
+### Economic-security audit (Edge 7)
+
+Enable a mechanical adversarial audit that estimates how much value an
+adversary could extract if they knew the rebalancing schedule one day in
+advance.
+
+```yaml
+audit:
+  economic_security: true
+  economic_security_config:
+    front_run_advance_days: 1
+    close_on_rebalance: true
+    adversary_cost_model:
+      slippage: 0.001
+      borrow_cost_annual: 0.03
+      max_participation_rate: 0.10
+    attack_vectors:
+      - front_run
+      - delayed_arbitrage
+      - liquidity_squeeze
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `economic_security` | bool | `false` | Master toggle. |
+| `economic_security_config.front_run_advance_days` | int | `1` | Trading days before each rebalance the adversary positions. |
+| `economic_security_config.close_on_rebalance` | bool | `true` | Close the spoofed position on the rebalance day. |
+| `economic_security_config.adversary_cost_model.slippage` | float | `0.001` | Adversary execution cost as a fraction of notional. |
+| `economic_security_config.adversary_cost_model.borrow_cost_annual` | float | `0.03` | Shorting cost for delayed-arbitrage legs. |
+| `economic_security_config.adversary_cost_model.max_participation_rate` | float | `0.10` | Max fraction of ADV the adversary can trade. |
+| `economic_security_config.attack_vectors` | list[str] | all | Subset of `front_run`, `delayed_arbitrage`, `liquidity_squeeze`. |
+
+## Differentiable certifiable execution (Edge 6)
+
+`spec.portfolio.objective` can be set to `differentiable_sharpe` to train a
+small JAX MLP by gradient descent and still emit an Aureum Backtest
+Certificate.  The strategy must declare a `model.architecture_file` and a
+`training` block with `train_end` / `val_end` splits.
+
+```yaml
+portfolio:
+  objective: differentiable_sharpe
+  long_only: true
+  max_weight: 0.35
+
+  model:
+    architecture_file: models/sharpe_mlp.yaml
+    input_features: [mean_return_252d, volatility_252d, momentum_12_1]
+    hidden_units: [64, 32]
+    activation: softplus
+    output_temperature: 1.0
+
+  training:
+    learning_rate: 0.001
+    epochs: 200
+    batch_size: 16
+    l2_penalty: 0.0001
+    max_weight_penalty: 10.0
+    early_stopping_patience: 20
+    train_end: "2022-12-31"
+    val_end: "2023-12-31"
 ```
 
 | Field | Values | Description |

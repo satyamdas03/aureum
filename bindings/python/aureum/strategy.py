@@ -21,7 +21,6 @@ BUILTIN_RANKING_SIGNALS = {
     "mean_reversion_5_20",
 }
 
-
 @dataclass
 class Strategy:
     """Parsed Aureum Quant Kernel strategy."""
@@ -49,6 +48,47 @@ class Strategy:
     def from_file(cls, path: str | Path) -> Strategy:
         path = Path(path)
         return cls.from_yaml(path.read_text(encoding="utf-8"))
+
+    def _validate_audit(self, errors: list[str]) -> None:
+        """Validate the optional ``spec.audit`` section."""
+        audit = self.spec.get("audit", {})
+        if not audit:
+            return
+
+        econ_sec = audit.get("economic_security")
+        if econ_sec is not None and not isinstance(econ_sec, bool):
+            errors.append("spec.audit.economic_security must be a boolean")
+
+        econ_cfg = audit.get("economic_security_config")
+        if econ_cfg is not None:
+            if not isinstance(econ_cfg, dict):
+                errors.append("spec.audit.economic_security_config must be a dict")
+                return
+            known_keys = {
+                "front_run_advance_days",
+                "close_on_rebalance",
+                "adversary_cost_model",
+                "attack_vectors",
+            }
+            unknown = set(econ_cfg.keys()) - known_keys
+            if unknown:
+                errors.append(
+                    f"spec.audit.economic_security_config has unknown keys: {sorted(unknown)}"
+                )
+
+            cost_model = econ_cfg.get("adversary_cost_model", {})
+            if cost_model is not None and not isinstance(cost_model, dict):
+                errors.append(
+                    "spec.audit.economic_security_config.adversary_cost_model must be a dict"
+                )
+            elif isinstance(cost_model, dict):
+                cost_keys = {"slippage", "borrow_cost_annual", "max_participation_rate"}
+                unknown_cost = set(cost_model.keys()) - cost_keys
+                if unknown_cost:
+                    errors.append(
+                        "spec.audit.economic_security_config.adversary_cost_model "
+                        f"has unknown keys: {sorted(unknown_cost)}"
+                    )
 
     def _validate_portfolio(self, errors: list[str]) -> None:
         """Validate the optional ``spec.portfolio`` MPT section."""
@@ -122,7 +162,13 @@ class Strategy:
             return
 
         graph = CausalGraph.from_portfolio_spec(portfolio)
-        symbols = self.spec.get("universe", {}).get("symbols", [])
+        universe = self.spec.get("universe", {})
+        if isinstance(universe, dict):
+            symbols = list(universe.get("symbols", []))
+        elif isinstance(universe, list):
+            symbols = list(universe)
+        else:
+            symbols = []
         errors.extend(graph.validate(symbols))
 
         if separation is None:
@@ -138,12 +184,21 @@ class Strategy:
             )
 
         if separation.mode == "condition_on":
+            if not separation.drivers:
+                errors.append(
+                    "spec.portfolio.causal_separation.drivers is required "
+                    "when mode is condition_on"
+                )
             unknown = set(separation.drivers) - set(graph.driver_names())
             if unknown:
                 errors.append(
                     "undeclared driver in causal_separation: "
                     f"{sorted(unknown)}"
                 )
+        if not isinstance(separation.auto_r2_threshold, (int, float)):
+            errors.append(
+                "spec.portfolio.causal_separation.auto_r2_threshold must be a number"
+            )
 
     def _validate_conformal_portfolio(
         self, portfolio: dict[str, Any], errors: list[str]
@@ -195,6 +250,106 @@ class Strategy:
                 "supported values: mean_variance, minimum_variance, maximum_sharpe, risk_parity"
             )
 
+    def _validate_differentiable_sharpe(
+        self, portfolio: dict[str, Any], errors: list[str]
+    ) -> None:
+        """Validate the ``spec.portfolio`` block when objective is differentiable_sharpe."""
+        model = portfolio.get("model")
+        if not isinstance(model, dict):
+            errors.append(
+                "spec.portfolio.model is required when objective is differentiable_sharpe"
+            )
+            return
+
+        architecture_file = model.get("architecture_file")
+        if not architecture_file:
+            errors.append(
+                "spec.portfolio.model.architecture_file is required "
+                "when objective is differentiable_sharpe"
+            )
+
+        training = portfolio.get("training")
+        if not isinstance(training, dict):
+            errors.append(
+                "spec.portfolio.training is required when objective is differentiable_sharpe"
+            )
+            return
+
+        required_training = {
+            "learning_rate",
+            "epochs",
+            "train_end",
+            "val_end",
+        }
+        missing = required_training - set(training.keys())
+        if missing:
+            errors.append(
+                "spec.portfolio.training is missing required fields: "
+                f"{sorted(missing)}"
+            )
+
+        for key in ("learning_rate", "epochs"):
+            if key in training and not isinstance(
+                training[key], (int, float)
+            ):
+                errors.append(f"spec.portfolio.training.{key} must be a number")
+
+        if "train_end" in training and "val_end" in training:
+            try:
+                train_end = dt.date.fromisoformat(str(training["train_end"]))
+                val_end = dt.date.fromisoformat(str(training["val_end"]))
+            except ValueError:
+                errors.append(
+                    "spec.portfolio.training.train_end and val_end must be valid ISO-8601 dates"
+                )
+            else:
+                if train_end >= val_end:
+                    errors.append(
+                        "spec.portfolio.training.train_end must be strictly before val_end"
+                    )
+
+    def _validate_signals(self, errors: list[str]) -> set[str]:
+        """Validate signal definitions and return the set of defined names."""
+        defined: set[str] = set()
+        signals = self.spec.get("signals", {})
+        if not signals:
+            return defined
+
+        if isinstance(signals, list):
+            for signal in signals:
+                name = signal.get("name")
+                if not name:
+                    continue
+                defined.add(name)
+        elif isinstance(signals, dict):
+            for name, signal in signals.items():
+                defined.add(name)
+                if signal.get("type") == "neuro_symbolic":
+                    formula = signal.get("formula", "")
+                    if not formula:
+                        errors.append(
+                            f"spec.signals.{name}.formula is required for neuro_symbolic signal"
+                        )
+                        continue
+                    ast, parse_error = AlphaGrammar.parse(formula)
+                    if parse_error or ast is None:
+                        errors.append(
+                            f"spec.signals.{name}.formula parse error: {parse_error or 'unknown'}"
+                        )
+                        continue
+                    report = safety_check(ast, formula=formula)
+                    if not report.safe:
+                        for failure in report.failures:
+                            errors.append(f"spec.signals.{name}.formula safety: {failure}")
+                        continue
+                    generation = signal.get("generation", {})
+                    if generation.get("safety_checks_passed") is False:
+                        errors.append(
+                            f"spec.signals.{name}.generation.safety_checks_passed is false; "
+                            "formula must pass safety checks"
+                        )
+        return defined
+
     def validate(self) -> list[str]:
         """Return a list of validation errors, empty if valid."""
         errors: list[str] = []
@@ -238,6 +393,8 @@ class Strategy:
             errors.append("spec.weights is required")
         if "execution" not in spec:
             errors.append("spec.execution is required")
+
+        self._validate_audit(errors)
         self._validate_metadata_links(errors)
         self._validate_audit_graph_persistence(errors)
         return errors
@@ -296,45 +453,6 @@ class Strategy:
         """Return the ``spec.audit.graph_persistence`` value, defaulting to ``none``."""
         return self.spec.get("audit", {}).get("graph_persistence", "none")
 
-    def _validate_signals(self, errors: list[str]) -> set[str]:
-        """Validate signal definitions and return the set of defined names."""
-        defined: set[str] = set()
-        signals = self.spec.get("signals", {})
-        if not signals:
-            return defined
-
-        if isinstance(signals, list):
-            for signal in signals:
-                name = signal.get("name")
-                if not name:
-                    continue
-                defined.add(name)
-        elif isinstance(signals, dict):
-            for name, signal in signals.items():
-                defined.add(name)
-                if signal.get("type") == "neuro_symbolic":
-                    formula = signal.get("formula", "")
-                    if not formula:
-                        errors.append(f"spec.signals.{name}.formula is required for neuro_symbolic signal")
-                        continue
-                    ast, parse_error = AlphaGrammar.parse(formula)
-                    if parse_error or ast is None:
-                        errors.append(f"spec.signals.{name}.formula parse error: {parse_error or 'unknown'}")
-                        continue
-                    report = safety_check(ast, formula=formula)
-                    if not report.safe:
-                        for failure in report.failures:
-                            errors.append(f"spec.signals.{name}.formula safety: {failure}")
-                        continue
-                    # Safety-check flag must be honest when present.
-                    generation = signal.get("generation", {})
-                    if generation.get("safety_checks_passed") is False:
-                        errors.append(
-                            f"spec.signals.{name}.generation.safety_checks_passed is false; "
-                            "formula must pass safety checks"
-                        )
-        return defined
-
     def portfolio(self) -> dict[str, Any] | None:
         """Return the ``spec.portfolio`` block if present, else None."""
         return self.spec.get("portfolio")
@@ -379,6 +497,15 @@ class Strategy:
                 separation = CausalSeparationSpec.from_portfolio_spec(portfolio)
                 out.append(
                     {
+                        "name": "causal_graph",
+                        "variable": "causal_graph",
+                        "operator": "==",
+                        "limit": portfolio.get("causal_graph"),
+                        "hard": True,
+                    }
+                )
+                out.append(
+                    {
                         "name": "causal_separation_mode",
                         "variable": "causal_separation_mode",
                         "operator": "==",
@@ -395,57 +522,16 @@ class Strategy:
                         "hard": False,
                     }
                 )
+                out.append(
+                    {
+                        "name": "causal_separation",
+                        "variable": "causal_separation",
+                        "operator": "==",
+                        "limit": portfolio.get("causal_separation"),
+                        "hard": True,
+                    }
+                )
         return out
-
-    def _validate_differentiable_sharpe(
-        self, portfolio: dict[str, Any], errors: list[str]
-    ) -> None:
-        """Validate the ``spec.portfolio`` block when objective is differentiable_sharpe."""
-        model = portfolio.get("model")
-        if not isinstance(model, dict):
-            errors.append(
-                "spec.portfolio.model is required when objective is differentiable_sharpe"
-            )
-            return
-
-        architecture_file = model.get("architecture_file")
-        if not architecture_file:
-            errors.append(
-                "spec.portfolio.model.architecture_file is required "
-                "when objective is differentiable_sharpe"
-            )
-
-        training = portfolio.get("training")
-        if not isinstance(training, dict):
-            errors.append(
-                "spec.portfolio.training is required when objective is differentiable_sharpe"
-            )
-            return
-
-        required_fields = {
-            "learning_rate": "float",
-            "epochs": "int",
-            "train_end": "date (YYYY-MM-DD)",
-            "val_end": "date (YYYY-MM-DD)",
-        }
-        for field, kind in required_fields.items():
-            if field not in training:
-                errors.append(
-                    f"spec.portfolio.training.{field} is required ({kind}) "
-                    "when objective is differentiable_sharpe"
-                )
-
-        if "train_end" in training and "val_end" in training:
-            try:
-                train_end = dt.date.fromisoformat(training["train_end"])
-                val_end = dt.date.fromisoformat(training["val_end"])
-                if train_end >= val_end:
-                    errors.append("train_end must be strictly before val_end")
-            except ValueError:
-                errors.append(
-                    "spec.portfolio.training.train_end and val_end must be valid "
-                    "ISO dates (YYYY-MM-DD)"
-                )
 
     def to_dict(self) -> dict[str, Any]:
         return {

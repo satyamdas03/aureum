@@ -17,6 +17,7 @@ from .certificate import (
     hash_file,
 )
 from .dag import Dag, Node
+from .econsec import EconomicSecurityReport, audit_economic_security
 from .quantity import Dimension, Quantity, Unit
 from .strategy import Strategy
 from .verifier import verify_constraints
@@ -28,6 +29,7 @@ __all__ = [
     "BacktestRunner",
     "Dag",
     "Dimension",
+    "EconomicSecurityReport",
     "Environment",
     "ExecutionSummary",
     "InputLineage",
@@ -39,6 +41,7 @@ __all__ = [
     "Strategy",
     "Unit",
     "__version__",
+    "audit_economic_security",
     "get_environment",
     "hash_file",
     "verify_constraints",

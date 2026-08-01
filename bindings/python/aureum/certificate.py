@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from aureum.econsec import EconomicSecurityReport
 from aureum.graph import KnowledgeGraph
 
 
@@ -152,13 +153,17 @@ class Determinism:
     input_hash: str
     result_hash: str
     tolerance: str = "1e-6 relative + 1e-9 absolute"
+    economic_security_hash: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out = {
             "input_hash": self.input_hash,
             "result_hash": self.result_hash,
             "tolerance": self.tolerance,
         }
+        if self.economic_security_hash:
+            out["economic_security_hash"] = self.economic_security_hash
+        return out
 
 
 @dataclass
@@ -179,14 +184,14 @@ class PortfolioConstruction:
     weights_history: list[dict[str, Any]]
     frontier_hash: str = ""
     optimization_inputs_hash: str = ""
+    calibration_set_hash: str = ""
+    coverage_level: float = 0.0
+    prediction_set_width: float = 0.0
     causal_graph_hash: str = ""
     conditional_covariance_hash: str = ""
     model_architecture_hash: str = ""
     weights_hash: str = ""
     train_val_test_split_hashes: dict[str, str] = field(default_factory=dict)
-    calibration_set_hash: str = ""
-    coverage_level: float = 0.0
-    prediction_set_width: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         out = {
@@ -201,6 +206,12 @@ class PortfolioConstruction:
             out["frontier_hash"] = self.frontier_hash
         if self.optimization_inputs_hash:
             out["optimization_inputs_hash"] = self.optimization_inputs_hash
+        if self.calibration_set_hash:
+            out["calibration_set_hash"] = self.calibration_set_hash
+        if self.coverage_level:
+            out["coverage_level"] = self.coverage_level
+        if self.prediction_set_width:
+            out["prediction_set_width"] = self.prediction_set_width
         if self.causal_graph_hash:
             out["causal_graph_hash"] = self.causal_graph_hash
         if self.conditional_covariance_hash:
@@ -211,12 +222,6 @@ class PortfolioConstruction:
             out["weights_hash"] = self.weights_hash
         if self.train_val_test_split_hashes:
             out["train_val_test_split_hashes"] = self.train_val_test_split_hashes
-        if self.calibration_set_hash:
-            out["calibration_set_hash"] = self.calibration_set_hash
-        if self.coverage_level:
-            out["coverage_level"] = self.coverage_level
-        if self.prediction_set_width:
-            out["prediction_set_width"] = self.prediction_set_width
         return out
 
 
@@ -249,6 +254,7 @@ class BacktestCertificate:
     execution_trace: dict[str, Any]
     determinism: Determinism
     portfolio_construction: PortfolioConstruction | None = None
+    economic_security: EconomicSecurityReport | None = None
     # Edge 5 — semantic knowledge graph lineage.
     graph_node_id: str | None = None
     linked_entity_hashes: list[str] = field(default_factory=list)
@@ -266,6 +272,7 @@ class BacktestCertificate:
         risk_constraints: list[dict[str, Any]],
         execution_trace: dict[str, Any],
         portfolio_construction: PortfolioConstruction | None = None,
+        economic_security: EconomicSecurityReport | None = None,
         graph_node_id: str | None = None,
         linked_entity_hashes: list[str] | None = None,
         knowledge_graph: KnowledgeGraph | None = None,
@@ -274,6 +281,13 @@ class BacktestCertificate:
         """Build a certificate from the raw parts of a backtest run."""
         input_hash = _sha256_text(_stable_json(inputs.to_dict()))
         result_hash = _sha256_text(_stable_json(results.to_dict()))
+        determinism = Determinism(
+            input_hash=input_hash, result_hash=result_hash
+        )
+        if economic_security is not None and economic_security.enabled:
+            determinism.economic_security_hash = _sha256_text(
+                _stable_json(economic_security.to_dict())
+            )
         return cls(
             aureum_version=environment.aureum_version,
             certificate_spec_version="1.0",
@@ -286,8 +300,9 @@ class BacktestCertificate:
             results=results,
             risk_constraints=risk_constraints,
             execution_trace=execution_trace,
-            determinism=Determinism(input_hash=input_hash, result_hash=result_hash),
+            determinism=determinism,
             portfolio_construction=portfolio_construction,
+            economic_security=economic_security,
             graph_node_id=graph_node_id,
             linked_entity_hashes=list(linked_entity_hashes) if linked_entity_hashes else [],
             knowledge_graph=knowledge_graph,
@@ -309,6 +324,8 @@ class BacktestCertificate:
         }
         if self.portfolio_construction is not None:
             out["portfolio_construction"] = self.portfolio_construction.to_dict()
+        if self.economic_security is not None:
+            out["economic_security"] = self.economic_security.to_dict()
         if self.graph_node_id is not None:
             out["graph_node_id"] = self.graph_node_id
         if self.linked_entity_hashes:
@@ -332,6 +349,10 @@ class BacktestCertificate:
         determinism = data["determinism"]
 
         portfolio_construction = None
+        economic_security = None
+        knowledge_graph = None
+        if "knowledge_graph" in data:
+            knowledge_graph = KnowledgeGraph.from_dict(data["knowledge_graph"])
         if "portfolio_construction" in data:
             pc = data["portfolio_construction"]
             portfolio_construction = PortfolioConstruction(
@@ -343,15 +364,23 @@ class BacktestCertificate:
                 weights_history=pc.get("weights_history", []),
                 frontier_hash=pc.get("frontier_hash", ""),
                 optimization_inputs_hash=pc.get("optimization_inputs_hash", ""),
+                calibration_set_hash=pc.get("calibration_set_hash", ""),
+                coverage_level=pc.get("coverage_level", 0.0),
+                prediction_set_width=pc.get("prediction_set_width", 0.0),
                 causal_graph_hash=pc.get("causal_graph_hash", ""),
                 conditional_covariance_hash=pc.get("conditional_covariance_hash", ""),
                 model_architecture_hash=pc.get("model_architecture_hash", ""),
                 weights_hash=pc.get("weights_hash", ""),
                 train_val_test_split_hashes=pc.get("train_val_test_split_hashes", {}),
-                calibration_set_hash=pc.get("calibration_set_hash", ""),
-                coverage_level=pc.get("coverage_level", 0.0),
-                prediction_set_width=pc.get("prediction_set_width", 0.0),
             )
+        if "economic_security" in data:
+            economic_security = EconomicSecurityReport.from_dict(
+                data["economic_security"]
+            )
+
+        alpha_lineage = None
+        if "alpha_lineage" in data:
+            alpha_lineage = AlphaLineage.from_dict(data["alpha_lineage"])
 
         knowledge_graph = None
         if "knowledge_graph" in data:
@@ -403,14 +432,14 @@ class BacktestCertificate:
                 input_hash=determinism["input_hash"],
                 result_hash=determinism["result_hash"],
                 tolerance=determinism.get("tolerance", "1e-6 relative + 1e-9 absolute"),
+                economic_security_hash=determinism.get("economic_security_hash", ""),
             ),
             portfolio_construction=portfolio_construction,
+            economic_security=economic_security,
             graph_node_id=data.get("graph_node_id"),
             linked_entity_hashes=list(data.get("linked_entity_hashes", [])),
             knowledge_graph=knowledge_graph,
-            alpha_lineage=AlphaLineage.from_dict(data["alpha_lineage"])
-            if "alpha_lineage" in data
-            else None,
+            alpha_lineage=alpha_lineage,
         )
 
     def with_draft_lineage(self, draft_lineage: dict[str, Any]) -> "BacktestCertificate":
