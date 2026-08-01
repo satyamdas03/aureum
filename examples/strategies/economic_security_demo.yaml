@@ -1,0 +1,76 @@
+# Example Aureum strategy with economic-security audit enabled.
+#
+# This is the same tech-momentum ranking as momentum.yaml, but it explicitly
+# turns on Edge 7 (economic-security audit) so the generated certificate
+# reports how much value a front-runner could extract from the predictable
+# monthly rebalancing schedule.
+
+apiVersion: aureum.io/v1alpha1
+kind: Strategy
+metadata:
+  name: economic-security-demo
+  description: |
+    Long the top 20% of tech stocks by 12-1 momentum, with the economic-security
+    audit attached to the certificate.
+  tags: [momentum, equity, economic-security, demo]
+
+spec:
+  universe:
+    source: sp500
+    filter:
+      sector: Technology
+      min_price: 5.00
+      min_adv20: 1000000
+
+  schedule:
+    rebalance: 1M
+    lookback: 252d
+
+  signals:
+    - name: momentum_12_1
+      description: 12-month return excluding last month (Jegadeesh-Titman)
+      expr: returns(close, 252).sum() - returns(close, 21).sum()
+      type: return
+
+  ranking:
+    by: momentum_12_1
+    ascending: false
+
+  weights:
+    kind: equal
+    top_n: 0.20
+
+  risk:
+    max_drawdown:
+      value: 0.30
+      hard: true
+    max_leverage:
+      value: 1.50
+      hard: true
+    max_turnover_annual:
+      value: 20.00
+      hard: false
+    max_concentration_single_name:
+      value: 0.30
+      hard: true
+
+  execution:
+    open: market_on_open
+    slippage: 0.0005
+
+  audit:
+    lineage: full
+    deterministic: true
+    deterministic_seed: 42
+    economic_security: true
+    economic_security_config:
+      front_run_advance_days: 1
+      close_on_rebalance: true
+      adversary_cost_model:
+        slippage: 0.001
+        borrow_cost_annual: 0.03
+        max_participation_rate: 0.10
+      attack_vectors:
+        - front_run
+        - delayed_arbitrage
+        - liquidity_squeeze

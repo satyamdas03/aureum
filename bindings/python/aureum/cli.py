@@ -8,11 +8,14 @@ import tarfile
 from pathlib import Path
 
 import click
+import yaml
 
 from .adapter import AlpacaAdapter
+from .alpha import AlphaMiner, safety_check
 from .author import StrategyAuthor
 from .backtest import BacktestRunner, MarketData
-from .certificate import get_environment
+from .certificate import get_environment, hash_file
+from .diffopt import DifferentiableSharpeOptimizer  # noqa: F401
 from .mpt import OptimizationInputs, build_efficient_frontier, estimate_covariance, estimate_mean_returns
 from .prover import Lean4Generator, SmtLibGenerator, extract_claims
 from .reflector import StrategyReflector
@@ -38,6 +41,82 @@ def validate(path: Path) -> None:
             print(f"  - {error}")
         raise click.Abort()
     print(f"Strategy '{strategy.metadata['name']}' is valid.")
+
+
+@cli.command("alpha")
+@click.argument("prompt")
+@click.option(
+    "--output",
+    type=click.Path(path_type=Path),
+    help="Output YAML path for the emitted signals block",
+)
+@click.option("--model", default="claude-sonnet-5", help="Anthropic model name")
+@click.option(
+    "--validate-only",
+    help="Run static safety gating on the given formula without calling the LLM",
+)
+@click.option("--name", default="alpha", help="Signal name for the generated alpha")
+def alpha(
+    prompt: str,
+    output: Path | None,
+    model: str,
+    validate_only: str | None,
+    name: str,
+) -> None:
+    """Generate or validate a symbolic alpha factor.
+
+    In generate mode, sends the prompt to the configured Anthropic model and
+    returns a validated ``AlphaSpec`` as a YAML signals block.
+
+    In ``--validate-only FORMULA`` mode, runs the static safety gating without
+    calling the LLM and prints the safety report to stderr.
+    """
+    if validate_only is not None:
+        report = safety_check(validate_only)
+        click.echo(f"passed: {report.passed}")
+        if report.errors:
+            click.echo("errors:")
+            for error in report.errors:
+                click.echo(f"  - {error}")
+        if report.warnings:
+            click.echo("warnings:")
+            for warning in report.warnings:
+                click.echo(f"  - {warning}")
+        if not report.passed:
+            raise click.Abort()
+        return
+
+    miner = AlphaMiner(model=model)
+    spec = miner.mine(prompt, name=name, description=prompt)
+
+    block = {
+        "signals": [
+            {
+                "name": spec.name,
+                "description": spec.description,
+                "formula": spec.formula,
+                "type": "rank",
+                "generation": {
+                    "prompt_hash": f"sha256:{spec.generation_prompt_hash}",
+                    "safety_checks_passed": spec.safety_checks_passed,
+                    "model": spec.model,
+                },
+            }
+        ]
+    }
+    yaml_text = yaml.safe_dump(block, sort_keys=False)
+
+    if output:
+        output.write_text(yaml_text, encoding="utf-8")
+        click.echo(f"Signal block written to {output.resolve()}")
+    else:
+        click.echo(yaml_text.strip())
+
+    if not spec.safety_checks_passed:
+        click.echo("Safety report:", err=True)
+        for error in spec.safety_report:
+            click.echo(f"  - {error}", err=True)
+        raise click.Abort()
 
 
 @cli.command()
@@ -167,6 +246,18 @@ def reflect(
     type=click.Path(path_type=Path),
     help="Output Lean 4 verifier theorem file path",
 )
+@click.option(
+    "--economic-security",
+    is_flag=True,
+    help="Run the economic-security audit (uses default config if not in YAML)",
+)
+@click.option(
+    "--graph",
+    type=click.Choice(["none", "inline", "bundle"], case_sensitive=False),
+    default="none",
+    show_default=True,
+    help="Knowledge graph persistence mode for lineage",
+)
 def backtest(
     path: Path,
     data: Path | None,
@@ -175,6 +266,8 @@ def backtest(
     bundle: Path | None,
     smt: Path | None,
     lean: Path | None,
+    economic_security: bool,
+    graph: str,
 ) -> None:
     """Run a deterministic backtest for a strategy."""
     strategy = Strategy.from_file(path)
@@ -184,6 +277,16 @@ def backtest(
         for error in errors:
             click.echo(f"  - {error}")
         raise click.Abort()
+
+    if graph not in {"none", "inline", "bundle"}:
+        click.echo(
+            f"Error: --graph must be one of none, inline, bundle; got '{graph}'"
+        )
+        raise click.Abort()
+
+    graph_persistence = strategy.graph_persistence()
+    if graph != "none":
+        graph_persistence = graph
 
     data_source = str(data) if data else "synthetic"
     click.echo(f"Running backtest for '{strategy.metadata['name']}'...")
@@ -195,13 +298,23 @@ def backtest(
 
     market_data = MarketData.from_csv(data)
     runner = BacktestRunner(
-        strategy, market_data, data_source=data_source, initial_nav=1_000_000.0
+        strategy,
+        market_data,
+        data_source=data_source,
+        initial_nav=1_000_000.0,
+        strategy_path=path,
     )
 
     if certificate or bundle or smt or lean:
         env = get_environment(aureum_version=__version__, cwd=path.parent)
+        contract_paths: list[tuple[str, str]] = []
         cert = runner.build_certificate(
-            strategy_path=path, data_path=data, environment=env
+            strategy_path=path,
+            data_path=data,
+            environment=env,
+            economic_security=economic_security,
+            graph_persistence=graph_persistence,
+            contract_paths=contract_paths,
         )
         cert_json = cert.to_json(indent=2)
         cert_dict = cert.to_dict()
@@ -227,8 +340,38 @@ def backtest(
             lean.write_text(Lean4Generator().generate(claims), encoding="utf-8")
             click.echo(f"Lean 4 file written to {lean.resolve()}")
 
+        graph_path: Path | None = None
+        if graph_persistence == "bundle" and certificate:
+            graph_path = certificate.with_suffix(".graph.json")
+        elif graph_persistence == "bundle" and bundle:
+            graph_path = bundle.with_suffix(".graph.json")
+
+        if graph_path is not None and cert.knowledge_graph is not None:
+            graph_json = cert.knowledge_graph.to_json(indent=2)
+            graph_path.write_text(graph_json, encoding="utf-8")
+            cert_dict["graph_path"] = str(graph_path)
+            cert_dict["graph_sha256"] = hash_file(graph_path)
+            cert_json = json.dumps(cert_dict, indent=2, default=str, sort_keys=False)
+            if certificate:
+                certificate.write_text(cert_json, encoding="utf-8")
+            click.echo(f"Graph sidecar written to {graph_path.resolve()}")
+
+        extra_files: list[tuple[Path, str]] = []
+        if graph_path is not None and graph_path.exists():
+            extra_files.append((graph_path, "certificate.graph.json"))
+
+        portfolio_spec = strategy.portfolio()
+        if (
+            portfolio_spec
+            and portfolio_spec.get("objective") == "differentiable_sharpe"
+        ):
+            arch_file = path.parent / portfolio_spec["model"]["architecture_file"]
+            extra_files.append((arch_file, "model_architecture.yaml"))
+            if runner._diffopt and runner._diffopt.weights_path:
+                extra_files.append((runner._diffopt.weights_path, "trained_weights.npz"))
+
         if bundle:
-            _write_bundle(bundle, path, data, cert_json)
+            _write_bundle(bundle, path, data, cert_json, extra_files=extra_files)
             click.echo(f"Bundle written to {bundle.resolve()}")
 
         if not output:
@@ -358,7 +501,11 @@ def snapshot(symbols: str, start: str, end: str, output: Path, feed: str, timefr
 
 
 def _write_bundle(
-    bundle_path: Path, strategy_path: Path, data_path: Path, cert_json: str
+    bundle_path: Path,
+    strategy_path: Path,
+    data_path: Path,
+    cert_json: str,
+    extra_files: list[tuple[Path, str]] | None = None,
 ) -> None:
     """Create a reproducibility bundle tarball containing inputs and certificate."""
     bundle_path = Path(bundle_path)
@@ -371,6 +518,8 @@ def _write_bundle(
         info = tarfile.TarInfo(name="certificate.json")
         info.size = len(cert_bytes)
         tar.addfile(info, BytesIO(cert_bytes))
+        for file_path, arcname in extra_files or []:
+            tar.add(file_path, arcname=arcname)
 
 
 def main() -> None:
