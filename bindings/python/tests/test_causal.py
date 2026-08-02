@@ -269,6 +269,7 @@ spec:
         data_path=data_path,
         environment=env,
     )
+    assert cert2.portfolio_construction is not None
     assert cert2.portfolio_construction.optimization_inputs_hash != original_hash
 
 

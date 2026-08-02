@@ -22,7 +22,7 @@ def test_signals_return_finite_number(
     signal_name: str, closes: list[float], expected_sign: int
 ) -> None:
     fn = _SIGNALS[signal_name]
-    volumes = [1_000_000] * len(closes)
+    volumes: list[float] = [1_000_000.0] * len(closes)
     score = fn(closes, volumes)
     assert not math.isnan(score)
     assert score != 0.0 or expected_sign == 0

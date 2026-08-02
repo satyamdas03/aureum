@@ -36,7 +36,8 @@ jobs:
       - name: Lint Python
         run: ruff check bindings/python
       - name: Type check Python
-        run: mypy bindings/python
+        working-directory: bindings/python
+        run: mypy aureum
       - name: Test Python
         run: pytest bindings/python
 

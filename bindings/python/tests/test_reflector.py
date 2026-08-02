@@ -141,7 +141,7 @@ def test_reflect_cli_with_mocked_llm(tmp_path: Path, monkeypatch):
     out = tmp_path / "fixed.yaml"
     runner = CliRunner()
     try:
-        reflector_module.AnthropicClient = FakeClient  # type: ignore[misc]
+        reflector_module.AnthropicClient = FakeClient  # type: ignore[assignment]
         result = runner.invoke(
             cli,
             [
