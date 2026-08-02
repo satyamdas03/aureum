@@ -35,7 +35,7 @@ def _read_version() -> str:
         with pyproject.open("rb") as f:
             data = tomllib.load(f)
         return str(data.get("project", {}).get("version", "0.4.0"))
-    return "0.4.0"
+    return "0.4.1"
 
 
 __version__ = _read_version()

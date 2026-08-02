@@ -2,6 +2,17 @@
 
 All notable changes to the Aureum project are documented in this file.
 
+## 0.4.1 — CI Hardening + PyPI Trusted Publishing
+
+### Fixed
+- Resolved ruff 0.16 lint errors across Python source and tests.
+- Fixed CI mypy invocation: run from `bindings/python` so project overrides apply.
+- Bumped mypy target to Python 3.12 for NumPy 2.5+ stub compatibility (runtime still supports 3.11+).
+- `aureum.__version__` now reads dynamically from `pyproject.toml`, preventing stale version mismatches.
+
+### Changed
+- Enabled PyPI trusted publishing via `.github/workflows/publish.yml`.
+
 ## 0.4.0 — Provable Portfolio Construction + Seven Revolutionary Edges
 
 ### Added
