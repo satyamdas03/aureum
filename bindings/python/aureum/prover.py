@@ -145,7 +145,7 @@ def verify_with_z3(smtlib: str) -> bool:
     static checking.
     """
     try:
-        import z3  # type: ignore[import-not-found]
+        import z3
     except ImportError as exc:
         raise RuntimeError(
             "z3-solver is not installed; install it to enable live verification"

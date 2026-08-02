@@ -236,6 +236,8 @@ def optimize_conformalized_portfolio(
     base_objective: str,
     coverage: float = 0.95,
     calibration_fraction: float = 0.20,
+    *,
+    covariance: np.ndarray | None = None,
     **base_kwargs: Any,
 ) -> ConformalPortfolioResult:
     """Optimize a portfolio on conservative conformal lower-bound returns.
@@ -252,6 +254,10 @@ def optimize_conformalized_portfolio(
         Target marginal coverage of the per-asset prediction sets.
     calibration_fraction:
         Share of ``returns`` reserved as a calibration set.
+    covariance:
+        Optional pre-computed N x N covariance matrix. When provided it is used
+        by the base optimizer instead of estimating covariance from the
+        optimization split (useful for causal conditioning or shrinkage).
     base_kwargs:
         Forwarded to the base MPT optimizer. Typical keys: ``covariance_estimator``,
         ``risk_measure`` (recorded for lineage), ``risk_free_rate``,
@@ -286,7 +292,10 @@ def optimize_conformalized_portfolio(
         # Fallback: run the base objective on the full window with a point
         # forecast and record a warning in the lineage metadata.
         mu_hat = estimate_mean_returns(arr, method="sample")
-        cov = estimate_covariance(arr, estimator=covariance_estimator)
+        if covariance is not None:
+            cov = covariance
+        else:
+            cov = estimate_covariance(arr, estimator=covariance_estimator)
         inputs = OptimizationInputs(
             expected_returns=mu_hat,
             covariance=cov,
@@ -321,7 +330,10 @@ def optimize_conformalized_portfolio(
     mu_hat = forecast_set.point_forecast
     mu_lower = forecast_set.lower_bounds
 
-    cov = estimate_covariance(R_opt, estimator=covariance_estimator)
+    if covariance is not None:
+        cov = covariance
+    else:
+        cov = estimate_covariance(R_opt, estimator=covariance_estimator)
     inputs = OptimizationInputs(
         expected_returns=mu_lower,
         covariance=cov,

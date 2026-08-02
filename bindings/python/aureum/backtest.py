@@ -664,11 +664,18 @@ class BacktestRunner:
             calibration_fraction = float(uncertainty.get("calibration_fraction", 0.20))
             base_objective = portfolio_spec["base_objective"]
 
+            # Edge 2: condition covariance on declared latent drivers when a
+            # causal graph is present.
+            cov, causal_meta = _estimate_conditional_covariance(
+                returns_arr, symbols, portfolio_spec
+            )
+
             cresult = optimize_conformalized_portfolio(
                 returns_arr,
                 base_objective=base_objective,
                 coverage=coverage,
                 calibration_fraction=calibration_fraction,
+                covariance=cov,
                 covariance_estimator=covariance_estimator,
                 risk_measure=risk_measure,
                 risk_free_rate=risk_free_rate,
@@ -717,6 +724,18 @@ class BacktestRunner:
                     },
                 },
             }
+            if causal_meta is not None:
+                conformal_meta["causal"] = {
+                    "selected_drivers": causal_meta["selected_drivers"],
+                    "driver_r2": causal_meta["driver_r2"],
+                    "betas": causal_meta["betas"],
+                    "conditional_covariance_hash": causal_meta[
+                        "conditional_covariance_hash"
+                    ],
+                }
+                conformal_meta["covariance_estimator"] = (
+                    f"{cresult.covariance_estimator}+causal_conditioned"
+                )
             if cresult.warning:
                 conformal_meta["conformal_warning"] = cresult.warning
             return target_values, conformal_meta
@@ -1263,11 +1282,19 @@ class BacktestRunner:
         )
 
         signal_nodes: list[Any] = []
-        for signal in self.strategy.spec.get("signals", []):
+        signals = self.strategy.spec.get("signals", {})
+        if isinstance(signals, dict):
+            signal_items = list(signals.items())
+        elif isinstance(signals, list):
+            signal_items = [(s.get("name", ""), s) for s in signals]
+        else:
+            signal_items = []
+        for name, signal in signal_items:
             signal_payload = {
-                "name": signal.get("name"),
-                "expr": signal.get("expr"),
-                "type": signal.get("type"),
+                "name": name,
+                "expr": signal.get("expr") if isinstance(signal, dict) else None,
+                "type": signal.get("type") if isinstance(signal, dict) else None,
+                "formula": signal.get("formula") if isinstance(signal, dict) else None,
             }
             signal_nodes.append(graph.add_entity(EntityType.SIGNAL, signal_payload))
 

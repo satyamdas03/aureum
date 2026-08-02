@@ -4,9 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aureum"
-version = "0.3.0"
+version = "0.4.0"
 description = "Python bindings and developer API for the Aureum semantic kernel."
 license = "Apache-2.0"
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "pyyaml>=6.0.2",
