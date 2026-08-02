@@ -5,6 +5,11 @@ will be backed by the Rust `aureum-core` crate via PyO3; the pure-Python
 implementation below is the MVP scaffolding.
 """
 
+from __future__ import annotations
+
+import pathlib
+import tomllib
+
 from .backtest import BacktestRunner, MarketData
 from .certificate import (
     BacktestCertificate,
@@ -22,7 +27,18 @@ from .quantity import Dimension, Quantity, Unit
 from .strategy import Strategy
 from .verifier import verify_constraints
 
-__version__ = "0.3.0"
+
+def _read_version() -> str:
+    """Read the package version from pyproject.toml at import time."""
+    pyproject = pathlib.Path(__file__).parent.parent / "pyproject.toml"
+    if pyproject.exists():
+        with pyproject.open("rb") as f:
+            data = tomllib.load(f)
+        return str(data.get("project", {}).get("version", "0.4.0"))
+    return "0.4.0"
+
+
+__version__ = _read_version()
 
 __all__ = [
     "BacktestCertificate",
