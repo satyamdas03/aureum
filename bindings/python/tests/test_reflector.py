@@ -10,7 +10,6 @@ from aureum.certificate import hash_file
 from aureum.cli import cli
 from aureum.reflector import ReflectionResult, StrategyReflector
 
-
 EXAMPLE_STRATEGY = Path(__file__).parents[3] / "examples" / "strategies" / "buggy_slippage.yaml"
 EXAMPLE_DATA = Path(__file__).parents[3] / "examples" / "data" / "synthetic_prices.csv"
 

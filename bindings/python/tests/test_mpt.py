@@ -12,8 +12,8 @@ from aureum.mpt import (
     estimate_mean_returns,
     optimize_maximum_sharpe,
     optimize_mean_variance,
-    optimize_minimum_variance,
     optimize_min_cvar,
+    optimize_minimum_variance,
     optimize_risk_parity,
 )
 

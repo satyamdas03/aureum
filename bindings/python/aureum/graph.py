@@ -156,7 +156,7 @@ class KnowledgeGraph:
             entity_type=entity_type,
             payload=payload,
             source_path=source_path,
-            created_at=dt.datetime.now(dt.timezone.utc)
+            created_at=dt.datetime.now(dt.UTC)
             .isoformat()
             .replace("+00:00", "Z"),
         )
@@ -182,7 +182,7 @@ class KnowledgeGraph:
             raise ValueError(f"target entity not found: {target}")
 
         timestamp = (
-            dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+            dt.datetime.now(dt.UTC).isoformat().replace("+00:00", "Z")
         )
         edge_hash = _relation_edge_hash(relation, source, target, timestamp)
         edge = RelationEdge(
@@ -261,7 +261,7 @@ class KnowledgeGraph:
 
         return result
 
-    def deduplicate(self) -> "KnowledgeGraph":
+    def deduplicate(self) -> KnowledgeGraph:
         """Return a new graph with only the most recent edge per (relation, source, target)."""
         seen: set[tuple[str, str, str]] = set()
         unique: list[RelationEdge] = []

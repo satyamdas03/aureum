@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 from aureum import __version__
 from aureum.ai import DEFAULT_MODEL
 from aureum.author import StrategyAuthor
-from aureum.backtest import BacktestRunner, MarketData, _SIGNALS
+from aureum.backtest import _SIGNALS, BacktestRunner, MarketData
 from aureum.certificate import get_environment
 from aureum.reflector import StrategyReflector
 from aureum.strategy import Strategy

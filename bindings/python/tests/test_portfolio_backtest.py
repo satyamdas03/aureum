@@ -67,8 +67,8 @@ def test_portfolio_certificate_includes_construction():
     strategy = Strategy.from_file(EXAMPLE_MPT_STRATEGY)
     data = MarketData.from_csv(EXAMPLE_DATA)
     runner = BacktestRunner(strategy, data, data_source=str(EXAMPLE_DATA))
-    from aureum.certificate import get_environment
     from aureum import __version__
+    from aureum.certificate import get_environment
 
     env = get_environment(__version__, cwd=EXAMPLE_MPT_STRATEGY.parent)
     cert = runner.build_certificate(

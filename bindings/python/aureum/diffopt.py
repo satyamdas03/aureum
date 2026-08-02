@@ -15,7 +15,7 @@ import io
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import jax
 import jax.numpy as jnp
@@ -90,7 +90,7 @@ class DifferentiableSharpeOptimizer:
     Aureum Backtest Certificate can record the full learned lineage.
     """
 
-    _FEATURE_FUNCS: dict[str, str] = {
+    _FEATURE_FUNCS: ClassVar[dict[str, str]] = {
         "mean_return_252d": "mean_return",
         "volatility_252d": "volatility",
         "momentum_12_1": "momentum",
@@ -489,7 +489,7 @@ class DifferentiableSharpeOptimizer:
         patience_counter = 0
 
         for epoch in range(self.epochs):
-            loss, grads = jax.value_and_grad(loss_fn)(
+            _loss, grads = jax.value_and_grad(loss_fn)(
                 params, train_features, train_returns
             )
             updates, opt_state = optimizer.update(grads, opt_state)

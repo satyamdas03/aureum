@@ -61,13 +61,13 @@ def _extract_yaml(text: str) -> str:
     match = re.search(r"```\n(.*?)\n```", text, re.DOTALL)
     if match:
         candidate = match.group(1).strip()
-        if candidate.startswith("apiVersion:") or candidate.startswith("kind:"):
+        if candidate.startswith(("apiVersion:", "kind:")):
             return candidate
 
     # 3. Bare YAML document
     lines = text.strip().splitlines()
     for i, line in enumerate(lines):
-        if line.startswith("apiVersion:") or line.startswith("kind:"):
+        if line.startswith(("apiVersion:", "kind:")):
             return "\n".join(lines[i:]).strip()
 
     raise StrategyAIError("No YAML block found in LLM response")

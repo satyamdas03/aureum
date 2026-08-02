@@ -20,7 +20,6 @@ from aureum.certificate import AlphaLineage, BacktestCertificate
 from aureum.cli import cli
 from aureum.strategy import Strategy
 
-
 EXAMPLE_DATA = Path(__file__).parents[3] / "examples" / "data" / "synthetic_prices.csv"
 ALPHA_STRATEGY = (
     Path(__file__).parents[3] / "examples" / "strategies" / "alpha_momentum_reversal.yaml"
@@ -318,8 +317,8 @@ def test_alpha_signal_registry_includes_formula():
 
 
 def test_certificate_includes_alpha_lineage():
-    from aureum.certificate import get_environment
     from aureum import __version__
+    from aureum.certificate import get_environment
 
     data = MarketData.from_csv(EXAMPLE_DATA)
     strategy = Strategy.from_file(ALPHA_STRATEGY)

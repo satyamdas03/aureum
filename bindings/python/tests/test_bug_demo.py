@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from aureum import __version__
 from aureum.backtest import BacktestRunner, MarketData
 from aureum.certificate import Environment, hash_file
 from aureum.strategy import Strategy
 from aureum.verifier import all_passed
-from aureum import __version__
 
 EXAMPLE_DATA = Path(__file__).parents[3] / "examples" / "data" / "synthetic_prices.csv"
 CORRECT_STRATEGY = (

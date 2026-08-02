@@ -235,7 +235,7 @@ class AlphaLineage:
         return {"alpha_signals": self.alpha_signals}
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "AlphaLineage":
+    def from_dict(cls, data: dict[str, Any]) -> AlphaLineage:
         return cls(alpha_signals=data.get("alpha_signals", []))
 
 
@@ -291,7 +291,7 @@ class BacktestCertificate:
         return cls(
             aureum_version=environment.aureum_version,
             certificate_spec_version="1.0",
-            generated_at=dt.datetime.now(dt.timezone.utc)
+            generated_at=dt.datetime.now(dt.UTC)
             .isoformat()
             .replace("+00:00", "Z"),
             environment=environment,
@@ -340,7 +340,7 @@ class BacktestCertificate:
         return json.dumps(self.to_dict(), indent=indent, default=str, sort_keys=False)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "BacktestCertificate":
+    def from_dict(cls, data: dict[str, Any]) -> BacktestCertificate:
         """Reconstruct a BacktestCertificate from a plain dictionary."""
         env = data["environment"]
         inputs = data["inputs"]
@@ -442,13 +442,13 @@ class BacktestCertificate:
             alpha_lineage=alpha_lineage,
         )
 
-    def with_draft_lineage(self, draft_lineage: dict[str, Any]) -> "BacktestCertificate":
+    def with_draft_lineage(self, draft_lineage: dict[str, Any]) -> BacktestCertificate:
         """Return a new certificate with draft lineage injected into execution_trace."""
         new_trace = dict(self.execution_trace)
         new_trace["draft_lineage"] = draft_lineage
         return dataclasses.replace(self, execution_trace=new_trace)
 
-    def with_strategy_path(self, path: str | Path) -> "BacktestCertificate":
+    def with_strategy_path(self, path: str | Path) -> BacktestCertificate:
         """Return a new certificate with the strategy input path rewritten.
 
         The strategy file content is assumed to be unchanged (e.g. the file was

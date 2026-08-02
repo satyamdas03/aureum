@@ -8,8 +8,9 @@ evaluated with NumPy vector primitives.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, ClassVar
 
 import numpy as np
 
@@ -25,7 +26,7 @@ class AlphaSpec:
     generation: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "AlphaSpec":
+    def from_dict(cls, data: dict[str, Any]) -> AlphaSpec:
         return cls(
             name=data.get("name", "alpha"),
             formula=data.get("formula", ""),
@@ -38,7 +39,7 @@ class AlphaAst:
     """Node in a parsed neuro-symbolic alpha formula."""
 
     name: str
-    args: list["AlphaAst"] = field(default_factory=list)
+    args: list[AlphaAst] = field(default_factory=list)
     value: float | None = None
 
     def is_literal(self) -> bool:
@@ -74,10 +75,10 @@ class AlphaResult:
 class AlphaGrammar:
     """Registry of deterministic primitives for the alpha DSL."""
 
-    variables: set[str] = {"close", "volume"}
+    variables: ClassVar[set[str]] = {"close", "volume"}
 
     # Primitives whose numeric argument is a lookback window.
-    window_primitives: set[str] = {
+    window_primitives: ClassVar[set[str]] = {
         "returns",
         "lag",
         "sma",
@@ -93,7 +94,7 @@ class AlphaGrammar:
     }
 
     # Primitives where numeric literals are allowed as thresholds or selectors.
-    threshold_primitives: set[str] = {
+    threshold_primitives: ClassVar[set[str]] = {
         "gt",
         "gte",
         "lt",
@@ -191,7 +192,7 @@ class AlphaGrammar:
 
     @staticmethod
     def _returns(series: np.ndarray, n: np.ndarray) -> np.ndarray:
-        window = int(round(float(n[-1])))
+        window = round(float(n[-1]))
         if window <= 0:
             raise ValueError("returns window must be positive")
         if len(series) <= window:
@@ -202,7 +203,7 @@ class AlphaGrammar:
 
     @staticmethod
     def _lag(series: np.ndarray, n: np.ndarray) -> np.ndarray:
-        offset = int(round(float(n[-1])))
+        offset = round(float(n[-1]))
         if offset < 0:
             raise ValueError("lag offset must be non-negative")
         if offset == 0:
@@ -214,7 +215,7 @@ class AlphaGrammar:
 
     @staticmethod
     def _sma(series: np.ndarray, n: np.ndarray) -> np.ndarray:
-        window = int(round(float(n[-1])))
+        window = round(float(n[-1]))
         if window <= 0:
             raise ValueError("sma window must be positive")
         if len(series) < window:
@@ -226,7 +227,7 @@ class AlphaGrammar:
 
     @staticmethod
     def _ema(series: np.ndarray, n: np.ndarray) -> np.ndarray:
-        window = int(round(float(n[-1])))
+        window = round(float(n[-1]))
         if window <= 0:
             raise ValueError("ema window must be positive")
         if len(series) < window:
@@ -240,7 +241,7 @@ class AlphaGrammar:
 
     @staticmethod
     def _volatility(series: np.ndarray, n: np.ndarray) -> np.ndarray:
-        window = int(round(float(n[-1])))
+        window = round(float(n[-1]))
         if window <= 1:
             raise ValueError("volatility window must be > 1")
         rets = np.full_like(series, np.nan)
@@ -252,7 +253,7 @@ class AlphaGrammar:
 
     @staticmethod
     def _momentum(series: np.ndarray, n: np.ndarray) -> np.ndarray:
-        window = int(round(float(n[-1])))
+        window = round(float(n[-1]))
         if window <= 0:
             raise ValueError("momentum window must be positive")
         out = np.full_like(series, np.nan)
@@ -262,7 +263,7 @@ class AlphaGrammar:
 
     @staticmethod
     def _zscore(series: np.ndarray, n: np.ndarray) -> np.ndarray:
-        window = int(round(float(n[-1])))
+        window = round(float(n[-1]))
         if window <= 1:
             raise ValueError("zscore window must be > 1")
         out = np.full_like(series, np.nan)
@@ -275,7 +276,7 @@ class AlphaGrammar:
 
     @staticmethod
     def _rsi(series: np.ndarray, n: np.ndarray) -> np.ndarray:
-        window = int(round(float(n[-1])))
+        window = round(float(n[-1]))
         if window <= 1:
             raise ValueError("rsi window must be > 1")
         rets = np.full_like(series, np.nan)
@@ -296,7 +297,7 @@ class AlphaGrammar:
 
     @staticmethod
     def _ts_argmax(series: np.ndarray, n: np.ndarray) -> np.ndarray:
-        window = int(round(float(n[-1])))
+        window = round(float(n[-1]))
         if window <= 0:
             raise ValueError("ts_argmax window must be positive")
         out = np.full_like(series, np.nan)
@@ -306,7 +307,7 @@ class AlphaGrammar:
 
     @staticmethod
     def _ts_argmin(series: np.ndarray, n: np.ndarray) -> np.ndarray:
-        window = int(round(float(n[-1])))
+        window = round(float(n[-1]))
         if window <= 0:
             raise ValueError("ts_argmin window must be positive")
         out = np.full_like(series, np.nan)
@@ -316,7 +317,7 @@ class AlphaGrammar:
 
     @staticmethod
     def _dollar_volume(close: np.ndarray, volume: np.ndarray, n: np.ndarray) -> np.ndarray:
-        window = int(round(float(n[-1])))
+        window = round(float(n[-1]))
         if window <= 0:
             raise ValueError("dollar_volume window must be positive")
         dv = close * volume
@@ -328,7 +329,7 @@ class AlphaGrammar:
 
     @staticmethod
     def _vwma(close: np.ndarray, volume: np.ndarray, n: np.ndarray) -> np.ndarray:
-        window = int(round(float(n[-1])))
+        window = round(float(n[-1]))
         if window <= 0:
             raise ValueError("vwma window must be positive")
         numerator = close * volume
@@ -516,7 +517,7 @@ class AlphaMiner:
         full_prompt = _alpha_prompt(prompt)
         try:
             text = self.client.complete(full_prompt, max_tokens=max_tokens)
-        except Exception as exc:  # pragma: no cover - LLM/network failures
+        except Exception as exc:  # pragma: no cover - LLM/network failures  # noqa: BLE001
             return AlphaResult(formula="", rationale=f"LLM call failed: {exc}")
 
         formula = _extract_formula(text)

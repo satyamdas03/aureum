@@ -100,7 +100,7 @@ class EconomicSecurityReport:
         return out
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "EconomicSecurityReport":
+    def from_dict(cls, data: dict[str, Any]) -> EconomicSecurityReport:
         """Reconstruct a report from a plain dictionary."""
         return cls(
             enabled=data["enabled"],

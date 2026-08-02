@@ -47,8 +47,8 @@ from aureum.mpt import (
     estimate_mean_returns,
     optimize_maximum_sharpe,
     optimize_mean_variance,
-    optimize_minimum_variance,
     optimize_min_cvar,
+    optimize_minimum_variance,
     optimize_risk_parity,
 )
 from aureum.quantity import (
@@ -1349,7 +1349,7 @@ class BacktestRunner:
         certificate_payload = {
             "aureum_version": environment.aureum_version,
             "certificate_spec_version": "1.0",
-            "generated_at": dt.datetime.now(dt.timezone.utc)
+            "generated_at": dt.datetime.now(dt.UTC)
             .isoformat()
             .replace("+00:00", "Z"),
             "determinism": {

@@ -10,18 +10,23 @@ from pathlib import Path
 import click
 import yaml
 
+from aureum import __version__
+
 from .adapter import AlpacaAdapter
 from .alpha import AlphaGrammar, AlphaMiner, safety_check
 from .author import StrategyAuthor
-
 from .backtest import BacktestRunner, MarketData
 from .certificate import get_environment, hash_file
 from .diffopt import DifferentiableSharpeOptimizer, _find_repo_root  # noqa: F401
-from .mpt import OptimizationInputs, build_efficient_frontier, estimate_covariance, estimate_mean_returns
+from .mpt import (
+    OptimizationInputs,
+    build_efficient_frontier,
+    estimate_covariance,
+    estimate_mean_returns,
+)
 from .prover import Lean4Generator, SmtLibGenerator, extract_claims
 from .reflector import StrategyReflector
 from .strategy import Strategy
-from aureum import __version__
 
 
 @click.group()

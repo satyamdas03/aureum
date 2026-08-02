@@ -6,16 +6,17 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from aureum import __version__
+
 from .ai import (
-    AnthropicClient,
     DEFAULT_MODEL,
+    AnthropicClient,
     _extract_yaml,
     build_reflector_prompt,
 )
 from .backtest import BacktestRunner, MarketData
 from .certificate import BacktestCertificate, get_environment
 from .strategy import Strategy
-from aureum import __version__
 
 
 @dataclass

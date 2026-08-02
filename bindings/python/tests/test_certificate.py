@@ -7,6 +7,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
+from aureum import __version__
 from aureum.backtest import BacktestRunner, MarketData
 from aureum.certificate import (
     BacktestCertificate,
@@ -16,7 +17,6 @@ from aureum.certificate import (
 )
 from aureum.cli import cli
 from aureum.strategy import Strategy
-from aureum import __version__
 
 EXAMPLE_STRATEGY = (
     Path(__file__).parents[3] / "examples" / "strategies" / "momentum.yaml"

@@ -231,7 +231,7 @@ class AlpacaAdapter:
 
         sha256 = _hash_file(path)
         meta_path = path.with_suffix(".snapshot.json")
-        fetched_at = dt.datetime.now(dt.timezone.utc).isoformat()
+        fetched_at = dt.datetime.now(dt.UTC).isoformat()
         snapshot = AlpacaSnapshot(
             path=path,
             symbols=tuple(sorted(symbols)),

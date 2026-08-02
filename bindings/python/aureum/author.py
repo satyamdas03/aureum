@@ -4,9 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+
+import yaml
+
+from aureum import __version__
+
 from .ai import (
-    AnthropicClient,
     DEFAULT_MODEL,
+    AnthropicClient,
     StrategyAIError,
     _extract_yaml,
     build_author_prompt,
@@ -15,7 +20,6 @@ from .ai import (
 from .backtest import BacktestRunner, MarketData
 from .certificate import get_environment
 from .strategy import Strategy
-from aureum import __version__
 
 
 @dataclass
@@ -70,7 +74,7 @@ class StrategyAuthor:
             try:
                 strategy = Strategy.from_yaml(last_yaml)
                 errors = strategy.validate()
-            except Exception as exc:
+            except (yaml.YAMLError, ValueError) as exc:
                 errors = [str(exc)]
 
             if not errors:

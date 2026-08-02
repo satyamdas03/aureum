@@ -13,7 +13,6 @@ from aureum.alpha import AlphaGrammar, safety_check
 from aureum.causal import CausalGraph, CausalSeparationSpec
 from aureum.graph import EntityType, Relation
 
-
 BUILTIN_RANKING_SIGNALS = {
     "momentum_12_1",
     "volatility_20d",

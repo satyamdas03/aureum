@@ -104,7 +104,7 @@ def _split_window(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Split ``returns`` into calibration and optimization rows."""
     t = returns.shape[0]
-    n_cal = int(math.floor(calibration_fraction * t))
+    n_cal = math.floor(calibration_fraction * t)
     n_cal = max(0, min(t - 1, n_cal))
     return returns[:n_cal], returns[n_cal:]
 
@@ -182,7 +182,7 @@ def conformalize_forecasts(
         )
 
     arr = _validate_returns(returns)
-    t, n = arr.shape
+    _t, n = arr.shape
     R_cal, R_opt = _split_window(arr, calibration_fraction)
     n_cal = R_cal.shape[0]
 
