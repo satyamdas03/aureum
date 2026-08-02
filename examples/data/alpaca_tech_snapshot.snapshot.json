@@ -1,0 +1,22 @@
+{
+  "path": "C:\\Users\\point\\projects\\aureum\\examples\\data\\alpaca_tech_snapshot.csv",
+  "symbols": [
+    "AAPL",
+    "AMZN",
+    "AVGO",
+    "GOOGL",
+    "META",
+    "MSFT",
+    "NVDA"
+  ],
+  "start_date": "2024-05-24",
+  "end_date": "2026-08-02",
+  "rows": 3829,
+  "sha256": "2091e260d76517fd74430c40964ef5f63c7f0bd4441a80594a075f3b86b29785",
+  "fetched_at": "2026-08-02T05:49:14.085581+00:00",
+  "feed": "iex",
+  "metadata": {
+    "timeframe": "1Day",
+    "source": "alpaca"
+  }
+}

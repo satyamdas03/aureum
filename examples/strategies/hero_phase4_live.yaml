@@ -1,0 +1,114 @@
+# Hero strategy combining as many Aureum Phase 4 edges as possible.
+# This variant runs against the live Alpaca tech-sector snapshot.
+#
+# Edges exercised:
+#   2. Causal MPT           : a declared latent tech-sector driver is conditioned
+#                            out of the covariance matrix before optimization.
+#   3. Conformal portfolios : the optimizer uses 95% split-conformal lower-bound
+#                            expected returns wrapped around maximum Sharpe.
+#   4. Neuro-symbolic alpha : a safe AlphaGrammar formula is declared for lineage,
+#                            even though portfolio weights come from the optimizer.
+#   5. Semantic knowledge graph : graph_persistence=inline plus a linked data
+#                            snapshot populates graph_node_id and linked_entity_hashes.
+#   7. Economic security    : the certificate includes a front-running audit.
+#
+# Universe: S&P 500 Technology names from the live Alpaca snapshot.
+# Data: examples/data/alpaca_tech_snapshot.csv
+
+apiVersion: aureum.io/v1alpha1
+kind: Strategy
+metadata:
+  name: hero-phase4-live
+  description: |
+    Combined Phase 4 hero against live Alpaca data: conformalized maximum-Sharpe
+    tech portfolio with a declared latent tech driver, neuro-symbolic alpha
+    lineage, inline knowledge graph, and economic-security audit.
+  tags: [hero, phase4, conformal, causal, neuro_symbolic, graph, econsec, live]
+  links:
+    - type: data_snapshot
+      relation: backtest_input
+      path: ../data/alpaca_tech_snapshot.csv
+
+spec:
+  universe:
+    source: sp500
+    filter:
+      sector: Technology
+      min_price: 5.00
+      min_adv20: 1_000_000
+
+  schedule:
+    rebalance: 1M
+    lookback: 252d
+
+  signals:
+    alpha:
+      type: neuro_symbolic
+      formula: if_else(gt(dollar_volume(close, volume, 20), 1_000_000.0), zscore(returns(close, 21), 63), 0.0)
+      description: |
+        21-day return z-score only for names with trailing 20-day dollar volume
+        above $1M. A positive value is interpreted as short-term momentum.
+      generation:
+        llm_model: claude-sonnet-5
+        prompt: A liquid-aware short-term momentum alpha for US tech names
+        safety_checks_passed: true
+
+  portfolio:
+    objective: conformalized_portfolio
+    base_objective: maximum_sharpe
+    uncertainty:
+      method: conformal_split
+      coverage: 0.95
+      calibration_fraction: 0.20
+    risk_measure: variance
+    covariance_estimator: sample
+    risk_free_rate: 0.0
+    lookback_days: 252
+    long_only: true
+    max_weight: 0.35
+    min_weight: 0.00
+    causal_graph:
+      drivers:
+        - name: tech_factor
+      edges:
+        - from: tech_factor
+          to: [AAPL, MSFT, NVDA, GOOGL, META, AMZN, AVGO]
+    causal_separation:
+      mode: condition_on
+      drivers: [tech_factor]
+
+  risk:
+    max_drawdown:
+      value: 0.30
+      hard: true
+    max_leverage:
+      value: 1.00
+      hard: true
+    max_turnover_annual:
+      value: 20.00
+      hard: false
+    max_concentration_single_name:
+      value: 0.35
+      hard: true
+
+  execution:
+    open: market_on_open
+    slippage: 0.0005
+
+  audit:
+    lineage: full
+    deterministic: true
+    deterministic_seed: 42
+    graph_persistence: inline
+    economic_security: true
+    economic_security_config:
+      front_run_advance_days: 1
+      close_on_rebalance: true
+      adversary_cost_model:
+        slippage: 0.001
+        borrow_cost_annual: 0.03
+        max_participation_rate: 0.10
+      attack_vectors:
+        - front_run
+        - delayed_arbitrage
+        - liquidity_squeeze
