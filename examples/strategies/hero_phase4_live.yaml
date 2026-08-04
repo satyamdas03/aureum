@@ -65,7 +65,7 @@ spec:
     risk_free_rate: 0.0
     lookback_days: 252
     long_only: true
-    max_weight: 0.35
+    max_weight: 0.25
     min_weight: 0.00
     causal_graph:
       drivers:
@@ -94,6 +94,9 @@ spec:
   execution:
     open: market_on_open
     slippage: 0.0005
+    max_total_invested_pct: 1.0
+    max_single_position_pct: 0.25
+    min_order_notional: 1.00
 
   audit:
     lineage: full

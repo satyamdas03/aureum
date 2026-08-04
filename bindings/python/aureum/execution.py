@@ -258,6 +258,45 @@ class LiveTradingConfig:
                     setattr(cfg, key, type(getattr(cfg, key))(value))
         return cfg
 
+    def validate_target(
+        self,
+        target_values: dict[str, float],
+        equity: float,
+    ) -> list[str]:
+        """Return risk-guardrail violations for a target portfolio."""
+        errors: list[str] = []
+        if equity <= 0:
+            errors.append(f"Account equity is non-positive: {equity}")
+            return errors
+
+        # Use a small epsilon so boundary values (e.g. exactly 25%) do not fail
+        # due to floating-point rounding in the optimizer.
+        epsilon = 1e-6
+        total_target = sum(target_values.values())
+        max_total = equity * self.max_total_invested_pct
+        if total_target > max_total + epsilon:
+            errors.append(
+                f"Total target value ${total_target:.2f} exceeds "
+                f"max_total_invested_pct={self.max_total_invested_pct:.0%} "
+                f"of equity ${equity:.2f}"
+            )
+
+        max_position = max(target_values.values()) if target_values else 0.0
+        max_single = equity * self.max_single_position_pct
+        if max_position > max_single + epsilon:
+            errors.append(
+                f"Single-name target ${max_position:.2f} exceeds "
+                f"max_single_position_pct={self.max_single_position_pct:.0%} "
+                f"of equity ${equity:.2f}"
+            )
+
+        if len(target_values) > self.max_positions:
+            errors.append(
+                f"Target portfolio has {len(target_values)} positions, "
+                f"exceeds max_positions={self.max_positions}"
+            )
+        return errors
+
 
 class AlpacaPaperExecutionBackend:
     """Execute a target portfolio against an Alpaca paper (or live) account.
@@ -416,35 +455,7 @@ class AlpacaPaperExecutionBackend:
         account: AccountSnapshot,
     ) -> list[str]:
         """Return a list of risk-guardrail violations, empty if all pass."""
-        errors: list[str] = []
-        equity = account.equity
-        if equity <= 0:
-            errors.append(f"Account equity is non-positive: {equity}")
-            return errors
-
-        total_target = sum(target_values.values())
-        if total_target > equity * self.config.max_total_invested_pct:
-            errors.append(
-                f"Total target value ${total_target:.2f} exceeds "
-                f"max_total_invested_pct={self.config.max_total_invested_pct:.0%} "
-                f"of equity ${equity:.2f}"
-            )
-
-        max_position = max(target_values.values()) if target_values else 0.0
-        if max_position > equity * self.config.max_single_position_pct:
-            errors.append(
-                f"Single-name target ${max_position:.2f} exceeds "
-                f"max_single_position_pct={self.config.max_single_position_pct:.0%} "
-                f"of equity ${equity:.2f}"
-            )
-
-        if len(target_values) > self.config.max_positions:
-            errors.append(
-                f"Target portfolio has {len(target_values)} positions, "
-                f"max_positions={self.config.max_positions}"
-            )
-
-        return errors
+        return self.config.validate_target(target_values, account.equity)
 
     def _poll_fills(self, orders: list[OrderRecord]) -> list[OrderRecord]:
         """Refresh submitted orders until they fill or the timeout elapses."""

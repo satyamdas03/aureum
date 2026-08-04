@@ -10,15 +10,15 @@
 .PARAMETER ScriptPath
     Path to ``aureum-daily-task.ps1``.
 .PARAMETER RunTime
-    Daily run time (HH:mm).  Default 09:15 US/Eastern gives a 15-minute buffer
-    before the 09:30 equity market open.
+    Daily run time (HH:mm).  Default 09:35 US/Eastern runs five minutes after the
+    09:30 equity market open so market-open checks pass.
 .PARAMETER DaysOfWeek
     Comma-separated list of weekdays to run (default: Monday through Friday).
 #>
 param(
     [string]$TaskName = "AureumDailyPaperTrading",
     [string]$ScriptPath = "$PSScriptRoot\aureum-daily-task.ps1",
-    [string]$RunTime = "09:15",
+    [string]$RunTime = "09:35",
     [string]$DaysOfWeek = "Monday,Tuesday,Wednesday,Thursday,Friday"
 )
 

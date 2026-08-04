@@ -9,7 +9,9 @@
 .PARAMETER DryRun
     Print intended orders without submitting them.
 .PARAMETER IgnoreMarketHours
-    Run even when the market is closed (useful for dry-run validation).
+    Run even when the market is closed (useful for dry-run validation). When
+    not set, the task will abort if the market is closed, which is the safe
+    default for real money-adjacent paper trading.
 .PARAMETER EnvFile
     Path to a key=value environment file.
 .PARAMETER Strategy
@@ -85,7 +87,7 @@ $timestamp = Get-Date -Format "yyyy-MM-dd-HHmm"
 $certPath = Join-Path $CertificateDir "live-$timestamp.json"
 
 $sharedArgs = @("--paper")
-if ($IgnoreMarketHours) { $sharedArgs += "--ignore-market-hours" }
+if ($DryRun -or $IgnoreMarketHours) { $sharedArgs += "--ignore-market-hours" }
 
 # ---------------------------------------------------------------------------
 # Account snapshot (always run first as a health check)
@@ -104,6 +106,11 @@ $liveArgs = @(
     "--certificate", $certPath
 ) + $sharedArgs
 if ($DryRun) { $liveArgs += "--dry-run" }
+
+# If not a dry run, respect market hours unless explicitly overridden.
+if (-not $DryRun -and -not $IgnoreMarketHours) {
+    Write-Step "Market-hours check enabled; task will abort if market is closed."
+}
 
 Write-Step "Running aureum live"
 & python -m aureum.cli @liveArgs
