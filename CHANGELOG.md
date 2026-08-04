@@ -2,6 +2,22 @@
 
 All notable changes to the Aureum project are documented in this file.
 
+## 0.4.2 — Live Alpaca Paper Trading Bridge
+
+### Added
+- `aureum.trading`: `AlpacaTradingAdapter` using Python stdlib `urllib`, with paper-only safety, kill-switch file checks, and `MarketClosedError` guardrails.
+- `aureum.execution`: `ExecutionBackend` protocol, `SimulatedExecutionBackend`, `AlpacaPaperExecutionBackend`, `LiveRunner`, and `LiveTradingConfig`.
+- `LiveTradingCertificate` dataclass for audit artifacts of single live rebalances.
+- New CLI commands: `aureum account` and `aureum live` with `--paper/--live`, `--check-only`, `--dry-run`, `--ignore-market-hours`, `--kill-switch`, and guardrail overrides.
+- Windows Task Scheduler integration: `bindings/python/scripts/aureum-daily-task.ps1`, `register-scheduled-task.ps1`, `.env.example`, and `README.md`.
+
+### Changed
+- `BacktestRunner` now accepts an `execution_backend` while preserving exact legacy backtest parity.
+
+### Fixed
+- `SimulatedExecutionBackend` now sells delisted/deselected positions by falling back to `market_data.price()`, restoring the original backtest behavior.
+- Dimensional-type usage in `SimulatedExecutionBackend` corrected from `Unit.base("USD")` to `Unit.base(USD)`.
+
 ## 0.4.1 — CI Hardening + PyPI Trusted Publishing
 
 ### Fixed
