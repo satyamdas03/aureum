@@ -16,9 +16,12 @@ from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from .execution import ExecutionBackend, TargetPortfolio
 
 from aureum.alpha import AlphaGrammar, safety_check
 from aureum.causal import (
@@ -51,14 +54,7 @@ from aureum.mpt import (
     optimize_minimum_variance,
     optimize_risk_parity,
 )
-from aureum.quantity import (
-    DOLLARS,
-    PRICE_PER_SHARE,
-    SHARE_COUNT,
-    USD,
-    Quantity,
-    Unit,
-)
+from aureum.quantity import Quantity
 from aureum.strategy import Strategy
 from aureum.verifier import verify_constraints
 
@@ -322,12 +318,14 @@ class BacktestRunner:
         data_source: str = "csv",
         initial_nav: float = 1_000_000.0,
         strategy_path: str | Path | None = None,
+        execution_backend: ExecutionBackend | None = None,
     ) -> None:
         self.strategy = strategy
         self.data = data
         self.data_source = data_source
         self.initial_nav = initial_nav
         self.strategy_path = Path(strategy_path) if strategy_path else None
+        self.execution_backend = execution_backend
         self._diffopt: DifferentiableSharpeOptimizer | None = None
         portfolio_spec = self.strategy.portfolio()
         if (
@@ -368,12 +366,9 @@ class BacktestRunner:
                 registry[name] = _make_evaluator(ast)
         return registry
 
-    def run(self) -> BacktestResult:
+    def _strategy_setup(self) -> tuple[dict[str, Any], dict[str, Any] | None, Callable[[list[float], list[float]], float] | None, bool, float]:
+        """Parse common strategy fields used by both backtest and live runs."""
         spec = self.strategy.spec
-        universe = spec["universe"]
-        execution = spec["execution"]
-        slippage = execution.get("slippage", 0.0)
-
         portfolio_spec = self.strategy.portfolio()
         signal_registry = self._build_signal_registry()
 
@@ -391,8 +386,95 @@ class BacktestRunner:
             ascending = False
             top_n = 1.0
 
-        positions: dict[str, Quantity] = {}
-        cash = Quantity(self.initial_nav, Unit.base(USD), "initial_nav")
+        return spec, portfolio_spec, signal_fn, ascending, top_n
+
+    def compute_target_portfolio(
+        self,
+        date: dt.date,
+        nav: float,
+        *,
+        portfolio_spec: dict[str, Any] | None = None,
+        signal_fn: Callable[[list[float], list[float]], float] | None = None,
+        ascending: bool = False,
+        top_n: float = 1.0,
+    ) -> TargetPortfolio:
+        """Compute the target dollar values and weights for one rebalance date.
+
+        This method is used internally by ``run()`` and is also exposed for the
+        live-trading path, where only the latest rebalance date matters.
+        """
+        from .execution import TargetPortfolio
+
+        spec = self.strategy.spec
+        universe = spec["universe"]
+        candidates = self._eligible_universe(date, universe)
+
+        target_values: dict[str, float]
+        selected: list[str]
+        portfolio_meta: dict[str, Any] | None
+        scores: dict[str, float] | None
+
+        if portfolio_spec is not None:
+            target_values, portfolio_meta = self._portfolio_target_values(
+                date, candidates, nav, portfolio_spec
+            )
+            selected = sorted(target_values.keys())
+            scores = None
+        else:
+            if signal_fn is None:
+                raise ValueError("signal_fn is required for ranking strategies")
+            scores = {}
+            for symbol in candidates:
+                closes = self.data.closes_up_to(date, symbol)
+                volumes = self.data.volumes_up_to(date, symbol)
+                score = signal_fn(closes, volumes)
+                if not math.isnan(score):
+                    scores[symbol] = score
+
+            if not scores:
+                target_values = {}
+                selected = []
+                portfolio_meta = None
+            else:
+                ranked = sorted(
+                    scores.items(), key=lambda item: item[1], reverse=not ascending
+                )
+                select_count = max(1, round(len(ranked) * top_n))
+                selected = [symbol for symbol, _ in ranked[:select_count]]
+
+                target_weight = 1.0 / len(selected)
+                target_values = {s: nav * target_weight for s in selected}
+                portfolio_meta = None
+
+        prices: dict[str, float] = {}
+        for symbol in set(selected) | set(target_values.keys()):
+            p = self.data.price(date, symbol)
+            if p is not None and p > 0:
+                prices[symbol] = p
+
+        weights = {s: v / nav if nav > 0 else 0.0 for s, v in target_values.items()}
+
+        return TargetPortfolio(
+            date=date,
+            target_values=target_values,
+            target_weights=weights,
+            prices=prices,
+            portfolio_meta=portfolio_meta,
+            scores=scores,
+        )
+
+    def run(self) -> BacktestResult:
+        spec, portfolio_spec, signal_fn, ascending, top_n = self._strategy_setup()
+        execution = spec["execution"]
+        slippage = execution.get("slippage", 0.0)
+
+        # Lazy import to avoid a circular import at module load time.
+        from .execution import ExecutionContext, SimulatedExecutionBackend
+
+        backend = self.execution_backend or SimulatedExecutionBackend()
+
+        positions: dict[str, float] = {}
+        cash = self.initial_nav
         daily_nav: list[dict[str, Any]] = []
         daily_positions: list[dict[str, Any]] = []
         rebalance_log: list[dict[str, Any]] = []
@@ -405,127 +487,72 @@ class BacktestRunner:
         rebalance_dates = self._rebalance_dates()
 
         for date in self.data.dates:
-            nav = self._portfolio_value(date, positions, cash)
+            nav = self._portfolio_value_float(date, positions, cash)
             daily_nav.append({"date": date.isoformat(), "nav": round(nav, 4)})
 
-            gross_value = self._gross_position_value(date, positions)
+            gross_value = self._gross_position_value_float(date, positions)
             leverage = gross_value / nav if nav > 0 else 0.0
             concentration = (
-                self._max_position_value(date, positions) / nav if nav > 0 else 0.0
+                self._max_position_value_float(date, positions) / nav if nav > 0 else 0.0
             )
             max_leverage = max(max_leverage, leverage)
             max_concentration = max(max_concentration, concentration)
             daily_positions.append(
                 {
                     "date": date.isoformat(),
-                    "cash": round(cash.value, 4),
-                    "positions": {s: round(v.value, 6) for s, v in sorted(positions.items())},
+                    "cash": round(cash, 4),
+                    "positions": {s: round(v, 6) for s, v in sorted(positions.items())},
                     "leverage": round(leverage, 6),
                     "concentration": round(concentration, 6),
                 }
             )
 
             if date in rebalance_dates:
-                candidates = self._eligible_universe(date, universe)
+                target = self.compute_target_portfolio(
+                    date,
+                    nav,
+                    portfolio_spec=portfolio_spec,
+                    signal_fn=signal_fn,
+                    ascending=ascending,
+                    top_n=top_n,
+                )
 
-                if portfolio_spec is not None:
-                    target_values, portfolio_meta = self._portfolio_target_values(
-                        date, candidates, nav, portfolio_spec
-                    )
-                    selected = sorted(target_values.keys())
-                    scores: dict[str, float] = {}
-                else:
-                    scores = {}
-                    for symbol in candidates:
-                        closes = self.data.closes_up_to(date, symbol)
-                        volumes = self.data.volumes_up_to(date, symbol)
-                        if signal_fn is None:
-                            continue
-                        score = signal_fn(closes, volumes)
-                        if not math.isnan(score):
-                            scores[symbol] = score
+                # Skip the day if no candidates passed the screen.
+                if not target.target_values and not target.portfolio_meta:
+                    continue
 
-                    if not scores:
-                        continue
+                context = ExecutionContext(
+                    date=date,
+                    current_positions=positions,
+                    cash=cash,
+                    slippage=slippage,
+                    market_data=self.data,
+                )
+                exec_result = backend.execute(target, context)
 
-                    ranked = sorted(
-                        scores.items(), key=lambda item: item[1], reverse=not ascending
-                    )
-                    select_count = max(1, round(len(ranked) * top_n))
-                    selected = [symbol for symbol, _ in ranked[:select_count]]
-
-                    target_weight = 1.0 / len(selected)
-                    target_values = {s: nav * target_weight for s in selected}
-                    portfolio_meta = None
-
-                new_positions: dict[str, Quantity] = {}
-                new_cash = cash
-                turnover_notional = 0.0
-                relevant_symbols = set(selected) | set(positions.keys())
-                for symbol in relevant_symbols:
-                    raw_price = self.data.price(date, symbol)
-                    if raw_price is None or raw_price <= 0:
-                        continue
-
-                    price = Quantity(raw_price, PRICE_PER_SHARE, f"price:{symbol}")
-                    target_value = Quantity(
-                        target_values.get(symbol, 0.0), DOLLARS, "target_value"
-                    )
-                    current_shares = positions.get(
-                        symbol, Quantity(0.0, SHARE_COUNT, "zero")
-                    )
-
-                    try:
-                        target_shares = target_value.divide(price)
-                        delta_shares = target_shares.add(
-                            Quantity(-current_shares.value, SHARE_COUNT, "neg_current")
-                        )
-
-                        if delta_shares.value > 0:
-                            exec_price = price.multiply(
-                                Quantity(1.0 + slippage, Unit.dimensionless(), "slippage")
-                            )
-                        else:
-                            exec_price = price.multiply(
-                                Quantity(1.0 - slippage, Unit.dimensionless(), "slippage")
-                            )
-
-                        adjusted_delta_qty = target_value.divide(exec_price).add(
-                            Quantity(-current_shares.value, SHARE_COUNT, "neg_current")
-                        )
-                        new_positions[symbol] = current_shares.add(adjusted_delta_qty)
-                        cash_spent = adjusted_delta_qty.multiply(exec_price)
-                        new_cash = new_cash.add(
-                            Quantity(-cash_spent.value, DOLLARS, "cash_spent")
-                        )
-
-                        adjusted_delta = adjusted_delta_qty.value
-                        if abs(adjusted_delta) > 1e-9:
-                            trades += 1
-                        turnover_notional += abs(cash_spent.value)
-                    except (ValueError, ZeroDivisionError) as exc:
-                        dimensional_errors.append(
-                            DimensionalError(
-                                step=f"rebalance:{date}:{symbol}", message=str(exc)
-                            )
-                        )
-                        new_positions[symbol] = current_shares
-
-                positions = {s: v for s, v in new_positions.items() if abs(v.value) > 1e-9}
-                cash = new_cash
-                cumulative_turnover += turnover_notional / nav if nav > 0 else 0.0
+                positions = exec_result.positions
+                cash = exec_result.cash
+                trades += exec_result.trades
+                cumulative_turnover += (
+                    exec_result.turnover_notional / nav if nav > 0 else 0.0
+                )
+                dimensional_errors.extend(exec_result.dimensional_errors)
 
                 log_entry: dict[str, Any] = {
                     "date": date.isoformat(),
-                    "selected": selected,
+                    "selected": sorted(target.target_values.keys()),
                     "nav": round(nav, 4),
                 }
-                if scores:
-                    log_entry["scores"] = {s: round(scores[s], 6) for s in selected}
-                if portfolio_meta is not None:
-                    log_entry["portfolio"] = portfolio_meta
-                    if "conformal" in portfolio_meta:
-                        log_entry["conformal"] = portfolio_meta["conformal"]
+                if target.scores is not None:
+                    log_entry["scores"] = {
+                        s: round(target.scores[s], 6)
+                        for s in sorted(target.target_values.keys())
+                        if s in target.scores
+                    }
+                if target.portfolio_meta is not None:
+                    log_entry["portfolio"] = target.portfolio_meta
+                    if "conformal" in target.portfolio_meta:
+                        log_entry["conformal"] = target.portfolio_meta["conformal"]
                 rebalance_log.append(log_entry)
 
         final_nav = daily_nav[-1]["nav"] if daily_nav else self.initial_nav
@@ -876,6 +903,16 @@ class BacktestRunner:
                 value += shares.value * raw_price
         return value
 
+    def _portfolio_value_float(
+        self, date: dt.date, positions: dict[str, float], cash: float
+    ) -> float:
+        value = cash
+        for symbol, shares in positions.items():
+            raw_price = self.data.price(date, symbol)
+            if raw_price is not None:
+                value += shares * raw_price
+        return value
+
     def _gross_position_value(
         self, date: dt.date, positions: dict[str, Quantity]
     ) -> float:
@@ -885,11 +922,30 @@ class BacktestRunner:
             if (raw_price := self.data.price(date, symbol)) is not None
         )
 
+    def _gross_position_value_float(
+        self, date: dt.date, positions: dict[str, float]
+    ) -> float:
+        return sum(
+            abs(qty * raw_price)
+            for symbol, qty in positions.items()
+            if (raw_price := self.data.price(date, symbol)) is not None
+        )
+
     def _max_position_value(
         self, date: dt.date, positions: dict[str, Quantity]
     ) -> float:
         values = [
             abs(qty.value * raw_price)
+            for symbol, qty in positions.items()
+            if (raw_price := self.data.price(date, symbol)) is not None
+        ]
+        return max(values) if values else 0.0
+
+    def _max_position_value_float(
+        self, date: dt.date, positions: dict[str, float]
+    ) -> float:
+        values = [
+            abs(qty * raw_price)
             for symbol, qty in positions.items()
             if (raw_price := self.data.price(date, symbol)) is not None
         ]

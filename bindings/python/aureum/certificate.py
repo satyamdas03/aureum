@@ -470,6 +470,109 @@ class BacktestCertificate:
         )
 
 
+@dataclass
+class LiveTradingCertificate:
+    """Structured audit artifact for a single live Alpaca paper-trading run.
+
+    Unlike ``BacktestCertificate``, this captures a *single* rebalance event
+    against a real broker account: the target portfolio, pre/post account
+    snapshots, submitted orders with fills, risk-check results, and any errors
+    that blocked execution.
+    """
+
+    aureum_version: str
+    certificate_spec_version: str
+    generated_at: str
+    run_id: str
+    environment: Environment
+    strategy_path: str
+    strategy_sha256: str
+    data_path: str | None
+    data_sha256: str | None
+    live_mode: str
+    market_clock: dict[str, Any]
+    pre_trade_account: dict[str, Any]
+    post_trade_account: dict[str, Any]
+    target_portfolio: dict[str, Any]
+    current_positions: list[dict[str, Any]]
+    orders: list[dict[str, Any]]
+    risk_checks: list[dict[str, Any]]
+    errors: list[str]
+    metadata: dict[str, Any]
+
+    @classmethod
+    def from_run(
+        cls,
+        *,
+        environment: Environment,
+        run_id: str,
+        strategy_path: str,
+        strategy_sha256: str,
+        live_mode: str,
+        market_clock: dict[str, Any],
+        pre_trade_account: dict[str, Any],
+        post_trade_account: dict[str, Any],
+        target_portfolio: dict[str, Any],
+        current_positions: list[dict[str, Any]],
+        orders: list[dict[str, Any]],
+        risk_checks: list[dict[str, Any]],
+        errors: list[str],
+        data_path: str | None = None,
+        data_sha256: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> LiveTradingCertificate:
+        """Build a live-trading certificate from the raw parts of a run."""
+        return cls(
+            aureum_version=environment.aureum_version,
+            certificate_spec_version="1.0-live",
+            generated_at=dt.datetime.now(dt.UTC)
+            .isoformat()
+            .replace("+00:00", "Z"),
+            run_id=run_id,
+            environment=environment,
+            strategy_path=strategy_path,
+            strategy_sha256=strategy_sha256,
+            data_path=data_path,
+            data_sha256=data_sha256,
+            live_mode=live_mode,
+            market_clock=market_clock,
+            pre_trade_account=pre_trade_account,
+            post_trade_account=post_trade_account,
+            target_portfolio=target_portfolio,
+            current_positions=current_positions,
+            orders=orders,
+            risk_checks=risk_checks,
+            errors=errors,
+            metadata=metadata or {},
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "aureum_version": self.aureum_version,
+            "certificate_spec_version": self.certificate_spec_version,
+            "generated_at": self.generated_at,
+            "run_id": self.run_id,
+            "environment": self.environment.to_dict(),
+            "strategy_path": self.strategy_path,
+            "strategy_sha256": self.strategy_sha256,
+            "data_path": self.data_path,
+            "data_sha256": self.data_sha256,
+            "live_mode": self.live_mode,
+            "market_clock": self.market_clock,
+            "pre_trade_account": self.pre_trade_account,
+            "post_trade_account": self.post_trade_account,
+            "target_portfolio": self.target_portfolio,
+            "current_positions": self.current_positions,
+            "orders": self.orders,
+            "risk_checks": self.risk_checks,
+            "errors": self.errors,
+            "metadata": self.metadata,
+        }
+
+    def to_json(self, indent: int = 2) -> str:
+        return json.dumps(self.to_dict(), indent=indent, default=str, sort_keys=False)
+
+
 def hash_file(path: str | Path) -> str:
     """Public helper for hashing input files."""
     return _sha256_file(Path(path))

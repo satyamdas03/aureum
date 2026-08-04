@@ -6,6 +6,7 @@ import json
 import math
 import tarfile
 from pathlib import Path
+from typing import Any
 
 import click
 import yaml
@@ -18,6 +19,11 @@ from .author import StrategyAuthor
 from .backtest import BacktestRunner, MarketData
 from .certificate import get_environment, hash_file
 from .diffopt import DifferentiableSharpeOptimizer, _find_repo_root  # noqa: F401
+from .execution import (
+    AlpacaPaperExecutionBackend,
+    LiveRunner,
+    LiveTradingConfig,
+)
 from .mpt import (
     OptimizationInputs,
     build_efficient_frontier,
@@ -27,6 +33,7 @@ from .mpt import (
 from .prover import Lean4Generator, SmtLibGenerator, extract_claims
 from .reflector import StrategyReflector
 from .strategy import Strategy
+from .trading import AlpacaTradingAdapter, AureumTradingError, MarketClosedError
 
 
 @click.group()
@@ -510,6 +517,178 @@ def snapshot(symbols: str, start: str, end: str, output: Path, feed: str, timefr
     click.echo(f"Snapshot written to {snap.path.resolve()}")
     click.echo(f"Rows: {snap.rows}, SHA-256: {snap.sha256}")
     click.echo(f"Metadata: {snap.path.with_suffix('.snapshot.json')}")
+
+
+@cli.command()
+@click.option(
+    "--paper/--live",
+    default=True,
+    help="Use Alpaca paper (default) or live endpoint",
+)
+@click.option(
+    "--ignore-market-hours",
+    is_flag=True,
+    help="Allow account check even when the market is closed",
+)
+@click.option(
+    "--kill-switch",
+    type=click.Path(path_type=Path),
+    help="Path to a kill-switch file; if it exists, the command exits silently",
+)
+def account(paper: bool, ignore_market_hours: bool, kill_switch: Path | None) -> None:
+    """Print the current Alpaca account snapshot and open positions."""
+    if kill_switch and kill_switch.exists():
+        click.echo("Kill switch is active; exiting without action.")
+        return
+
+    adapter = AlpacaTradingAdapter(
+        paper=paper,
+        market_open_required=not ignore_market_hours,
+    )
+    try:
+        clock = adapter.get_clock()
+        acct = adapter.get_account()
+        positions = adapter.get_positions()
+    except AureumTradingError as exc:
+        click.echo(f"Error: {exc}")
+        raise click.Abort() from exc
+
+    click.echo("Clock:")
+    click.echo(json.dumps(clock.to_dict(), indent=2))
+    click.echo("\nAccount:")
+    click.echo(json.dumps(acct.to_dict(), indent=2))
+    click.echo(f"\nPositions ({len(positions)}):")
+    for pos in positions:
+        click.echo(json.dumps(pos.to_dict(), indent=2))
+
+
+@cli.command()
+@click.argument("strategy", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--data",
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Recent price CSV for target-portfolio computation",
+)
+@click.option(
+    "--certificate",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Output LiveTradingCertificate JSON path",
+)
+@click.option(
+    "--paper/--live",
+    default=True,
+    help="Use Alpaca paper (default) or live endpoint",
+)
+@click.option(
+    "--check-only",
+    is_flag=True,
+    help="Compute target portfolio and print diagnostics without submitting orders",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Print intended orders but do not submit them",
+)
+@click.option(
+    "--ignore-market-hours",
+    is_flag=True,
+    help="Submit orders even when the market is closed",
+)
+@click.option(
+    "--kill-switch",
+    type=click.Path(path_type=Path),
+    help="Path to a kill-switch file; if it exists, the command exits silently",
+)
+@click.option(
+    "--max-single-position-pct",
+    type=float,
+    help="Maximum single-name allocation as a fraction of equity",
+)
+@click.option(
+    "--max-total-invested-pct",
+    type=float,
+    help="Maximum total invested notional as a fraction of equity",
+)
+@click.option(
+    "--min-order-notional",
+    type=float,
+    help="Minimum absolute notional for an order to be submitted",
+)
+def live(
+    strategy: Path,
+    data: Path,
+    certificate: Path,
+    paper: bool,
+    check_only: bool,
+    dry_run: bool,
+    ignore_market_hours: bool,
+    kill_switch: Path | None,
+    max_single_position_pct: float | None,
+    max_total_invested_pct: float | None,
+    min_order_notional: float | None,
+) -> None:
+    """Run a single live Alpaca paper-trading rebalance for a strategy."""
+    if kill_switch and kill_switch.exists():
+        click.echo("Kill switch is active; exiting without action.")
+        return
+
+    strat = Strategy.from_file(strategy)
+    errors = strat.validate()
+    if errors:
+        click.echo("Validation failed:")
+        for error in errors:
+            click.echo(f"  - {error}")
+        raise click.Abort()
+
+    market_data = MarketData.from_csv(data)
+    overrides: dict[str, Any] = {}
+    if max_single_position_pct is not None:
+        overrides["max_single_position_pct"] = max_single_position_pct
+    if max_total_invested_pct is not None:
+        overrides["max_total_invested_pct"] = max_total_invested_pct
+    if min_order_notional is not None:
+        overrides["min_order_notional"] = min_order_notional
+
+    config = LiveTradingConfig.from_strategy_spec(strat.spec, overrides=overrides)
+    config.dry_run = dry_run
+    config.market_open_required = not ignore_market_hours
+    config.paper = paper
+
+    adapter = AlpacaTradingAdapter(
+        paper=paper,
+        market_open_required=not ignore_market_hours,
+    )
+    backend = AlpacaPaperExecutionBackend(adapter, config)
+
+    runner = LiveRunner(
+        strategy=strat,
+        data=market_data,
+        data_source=str(data),
+        strategy_path=strategy,
+        backend=backend,
+    )
+
+    try:
+        cert = runner.run(check_only=check_only, dry_run=dry_run)
+    except MarketClosedError as exc:
+        click.echo(f"Market closed: {exc}")
+        raise click.Abort() from exc
+    except AureumTradingError as exc:
+        click.echo(f"Trading error: {exc}")
+        raise click.Abort() from exc
+
+    certificate = Path(certificate)
+    certificate.write_text(cert.to_json(indent=2), encoding="utf-8")
+    click.echo(f"Live certificate written to {certificate.resolve()}")
+    click.echo(f"Mode: {cert.live_mode}")
+    click.echo(f"Account equity: ${cert.pre_trade_account.get('equity', 0.0):.2f}")
+    click.echo(f"Orders submitted: {len(cert.orders)}")
+    if cert.errors:
+        click.echo("Errors:")
+        for error in cert.errors:
+            click.echo(f"  - {error}")
 
 
 def _write_bundle(

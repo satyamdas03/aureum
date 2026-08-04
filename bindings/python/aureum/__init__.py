@@ -17,14 +17,33 @@ from .certificate import (
     ExecutionSummary,
     InputLineage,
     Inputs,
+    LiveTradingCertificate,
     Results,
     get_environment,
     hash_file,
 )
 from .dag import Dag, Node
 from .econsec import EconomicSecurityReport, audit_economic_security
+from .execution import (
+    AlpacaPaperExecutionBackend,
+    ExecutionBackend,
+    ExecutionContext,
+    ExecutionResult,
+    LiveRunner,
+    LiveTradingConfig,
+    SimulatedExecutionBackend,
+    TargetPortfolio,
+)
 from .quantity import Dimension, Quantity, Unit
 from .strategy import Strategy
+from .trading import (
+    AccountSnapshot,
+    AlpacaTradingAdapter,
+    AureumTradingError,
+    ClockSnapshot,
+    OrderRecord,
+    PositionRecord,
+)
 from .verifier import verify_constraints
 
 
@@ -34,27 +53,42 @@ def _read_version() -> str:
     if pyproject.exists():
         with pyproject.open("rb") as f:
             data = tomllib.load(f)
-        return str(data.get("project", {}).get("version", "0.4.0"))
-    return "0.4.1"
+        return str(data.get("project", {}).get("version", "0.4.2"))
+    return "0.4.2"
 
 
 __version__ = _read_version()
 
 __all__ = [
+    "AccountSnapshot",
+    "AlpacaPaperExecutionBackend",
+    "AlpacaTradingAdapter",
+    "AureumTradingError",
     "BacktestCertificate",
     "BacktestRunner",
+    "ClockSnapshot",
     "Dag",
     "Dimension",
     "EconomicSecurityReport",
     "Environment",
+    "ExecutionBackend",
+    "ExecutionContext",
+    "ExecutionResult",
     "ExecutionSummary",
     "InputLineage",
     "Inputs",
+    "LiveRunner",
+    "LiveTradingCertificate",
+    "LiveTradingConfig",
     "MarketData",
     "Node",
+    "OrderRecord",
+    "PositionRecord",
     "Quantity",
     "Results",
+    "SimulatedExecutionBackend",
     "Strategy",
+    "TargetPortfolio",
     "Unit",
     "__version__",
     "audit_economic_security",

@@ -65,7 +65,7 @@ spec:
 
 def test_reflector_fixes_buggy_slippage(tmp_path: Path):
     client = _FakeClient([f"```yaml\n{_fixed_strategy_yaml()}\n```\nFixed slippage from 0.05 to 0.0005."])
-    reflector = StrategyReflector(client)
+    reflector = StrategyReflector(client)  # type: ignore[arg-type]
     result = reflector.reflect(
         EXAMPLE_STRATEGY,
         EXAMPLE_DATA,
@@ -87,7 +87,7 @@ def test_reflector_fixes_buggy_slippage(tmp_path: Path):
 
 def test_reflector_accepted_certificate_lineage_matches_output_file(tmp_path: Path):
     client = _FakeClient([f"```yaml\n{_fixed_strategy_yaml()}\n```\nFixed slippage from 0.05 to 0.0005."])
-    reflector = StrategyReflector(client)
+    reflector = StrategyReflector(client)  # type: ignore[arg-type]
     output_path = tmp_path / "fixed.yaml"
     result = reflector.reflect(
         EXAMPLE_STRATEGY,
@@ -112,7 +112,7 @@ def test_reflector_keeps_drafts_when_fix_fails(tmp_path: Path, monkeypatch):
         f"```yaml\n{bad_yaml}\n```\nFailed fix.",
         f"```yaml\n{bad_yaml}\n```\nFailed fix again.",
     ])
-    reflector = StrategyReflector(client)
+    reflector = StrategyReflector(client)  # type: ignore[arg-type]
     result = reflector.reflect(
         EXAMPLE_STRATEGY,
         EXAMPLE_DATA,
@@ -141,7 +141,7 @@ def test_reflect_cli_with_mocked_llm(tmp_path: Path, monkeypatch):
     out = tmp_path / "fixed.yaml"
     runner = CliRunner()
     try:
-        reflector_module.AnthropicClient = FakeClient  # type: ignore[assignment]
+        reflector_module.AnthropicClient = FakeClient  # type: ignore[assignment,misc]
         result = runner.invoke(
             cli,
             [

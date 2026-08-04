@@ -95,7 +95,7 @@ def test_author_cli_writes_yaml(tmp_path: Path, monkeypatch):
             return f"```yaml\n{_valid_strategy_yaml()}\n```\nRationale: test"
 
     try:
-        author_module.AnthropicClient = FakeClient  # type: ignore[assignment]
+        author_module.AnthropicClient = FakeClient  # type: ignore[assignment,misc]
         result = runner.invoke(
             cli,
             [
