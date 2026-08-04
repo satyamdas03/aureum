@@ -21,8 +21,15 @@ export default function LiveTradingPanel({
 }: LiveTradingPanelProps) {
   const [cert, setCert] = useState<LiveCertificate | null>(null);
   const [loading, setLoading] = useState(false);
-  const [mode, setMode] = useState<"check-only" | "dry-run">("dry-run");
+  const [mode, setMode] = useState<"check-only" | "dry-run" | "submit-paper">(
+    "dry-run"
+  );
+  const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const isRealExecution = mode === "submit-paper";
+  const canRun =
+    !disabled && !loading && (!isRealExecution || confirmed);
 
   const handleRun = async () => {
     setLoading(true);
@@ -31,7 +38,8 @@ export default function LiveTradingPanel({
       const result = await api.live(strategyYaml, dataPath, {
         dry_run: mode === "dry-run",
         check_only: mode === "check-only",
-        ignore_market_hours: true,
+        submit_orders: isRealExecution,
+        ignore_market_hours: !isRealExecution,
       });
       setCert(result);
     } catch (err) {
@@ -75,6 +83,16 @@ export default function LiveTradingPanel({
           >
             Dry run
           </button>
+          <button
+            onClick={() => setMode("submit-paper")}
+            className={`px-2 py-1 rounded border ${
+              mode === "submit-paper"
+                ? "bg-error text-cream border-error"
+                : "border-card text-slate hover:border-outline-variant"
+            }`}
+          >
+            Submit orders
+          </button>
         </div>
       </div>
 
@@ -85,7 +103,30 @@ export default function LiveTradingPanel({
           <span className="text-aureum-gold">Dry run</span> computes intended
           orders without submitting them.{" "}
           <span className="text-aureum-gold">Check only</span> validates the
-          target portfolio and account state.
+          target portfolio and account state.{" "}
+          <span className="text-error">Submit orders</span> sends real orders
+          to the Alpaca paper account.
+        </div>
+      )}
+
+      {isRealExecution && !cert && (
+        <div className="flex flex-col gap-2 border border-error/40 bg-error-container/10 p-2 rounded">
+          <div className="text-[11px] text-error font-semibold flex items-center gap-2">
+            <AlertCircle className="w-4 h-4" />
+            Real paper orders will be submitted to Alpaca.
+          </div>
+          <label className="flex items-start gap-2 text-[11px] text-cream cursor-pointer">
+            <input
+              type="checkbox"
+              checked={confirmed}
+              onChange={(e) => setConfirmed(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              I confirm this will submit market orders to the Alpaca paper
+              account and the market is open.
+            </span>
+          </label>
         </div>
       )}
 
@@ -178,15 +219,29 @@ export default function LiveTradingPanel({
 
       <button
         onClick={handleRun}
-        disabled={disabled || loading}
-        className="mt-auto bg-aureum-gold text-deep-navy font-mono-label text-mono-label font-bold py-md px-lg w-full flex items-center justify-center gap-sm hover:bg-primary transition-colors disabled:opacity-50"
+        disabled={!canRun}
+        className={`mt-auto font-mono-label text-mono-label font-bold py-md px-lg w-full flex items-center justify-center gap-sm transition-colors disabled:opacity-50 ${
+          isRealExecution
+            ? "bg-error text-cream hover:bg-error/80"
+            : "bg-aureum-gold text-deep-navy hover:bg-primary"
+        }`}
       >
         {loading ? (
-          <span className="w-4 h-4 border-2 border-deep-navy/30 border-t-deep-navy rounded-full animate-spin" />
+          <span
+            className={`w-4 h-4 border-2 rounded-full animate-spin ${
+              isRealExecution
+                ? "border-cream/30 border-t-cream"
+                : "border-deep-navy/30 border-t-deep-navy"
+            }`}
+          />
         ) : (
           <Play className="w-4 h-4" />
         )}
-        {mode === "check-only" ? "Check Live State" : "Run Dry-Run Live"}
+        {mode === "check-only"
+          ? "Check Live State"
+          : mode === "dry-run"
+          ? "Run Dry-Run Live"
+          : "Submit Paper Orders"}
       </button>
     </div>
   );

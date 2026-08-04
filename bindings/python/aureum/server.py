@@ -74,6 +74,7 @@ class LiveRequest(BaseModel):
     data_path: str
     dry_run: bool = True
     check_only: bool = False
+    submit_orders: bool = False
     ignore_market_hours: bool = False
     max_single_position_pct: float | None = None
     max_total_invested_pct: float | None = None
@@ -199,7 +200,9 @@ def live(request: LiveRequest) -> dict[str, Any]:
             overrides["min_order_notional"] = request.min_order_notional
 
         config = LiveTradingConfig.from_strategy_spec(strategy.spec, overrides=overrides)
-        config.dry_run = request.dry_run
+        # Safety: submit_orders overrides dry_run. Never submit orders when the
+        # market is closed unless explicitly requested.
+        config.dry_run = not request.submit_orders
         config.market_open_required = not request.ignore_market_hours
         config.paper = True
 
@@ -215,7 +218,10 @@ def live(request: LiveRequest) -> dict[str, Any]:
             strategy_path=tmp_strategy,
             backend=backend,
         )
-        cert = runner.run(check_only=request.check_only, dry_run=request.dry_run)
+        cert = runner.run(
+            check_only=request.check_only,
+            dry_run=not request.submit_orders,
+        )
         return cert.to_dict()
     except HTTPException:
         raise

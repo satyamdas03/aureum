@@ -42,6 +42,7 @@ export const api = {
     options: {
       dry_run?: boolean;
       check_only?: boolean;
+      submit_orders?: boolean;
       ignore_market_hours?: boolean;
       max_single_position_pct?: number;
       max_total_invested_pct?: number;
