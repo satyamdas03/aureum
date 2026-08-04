@@ -18,6 +18,7 @@ from typing import Any, Protocol
 
 from .backtest import BacktestRunner, DimensionalError, MarketData
 from .certificate import LiveTradingCertificate
+from .notify import Notification, console_sink, file_and_console
 from .quantity import DOLLARS, PRICE_PER_SHARE, SHARE_COUNT, USD, Quantity, Unit
 from .strategy import Strategy
 from .trading import (
@@ -508,12 +509,14 @@ class LiveRunner:
         data_source: str,
         strategy_path: Path,
         backend: AlpacaPaperExecutionBackend,
+        notification_dir: str | Path | None = None,
     ) -> None:
         self.strategy = strategy
         self.data = data
         self.data_source = data_source
         self.strategy_path = Path(strategy_path)
         self.backend = backend
+        self.notification_dir = Path(notification_dir) if notification_dir else None
         self._runner = BacktestRunner(
             strategy,
             data,
@@ -526,11 +529,27 @@ class LiveRunner:
         *,
         check_only: bool = False,
         dry_run: bool = False,
+        kill_switch: str | Path | None = None,
     ) -> LiveTradingCertificate:
         """Run one live rebalance and return a certificate."""
         from .certificate import get_environment, hash_file
 
         run_id = self.backend.run_id
+
+        if kill_switch is not None and Path(kill_switch).exists():
+            notif = Notification(
+                run_id=run_id,
+                timestamp=_now_iso(),
+                level="warning",
+                title="Kill switch active",
+                body=f"Kill switch file present at {kill_switch}; run aborted before trading.",
+                metadata={"kill_switch": str(kill_switch)},
+            )
+            self._emit(notif)
+            raise AureumTradingError(
+                f"Kill switch is active; exiting without action. ({kill_switch})"
+            )
+
         adapter = self.backend.adapter
         clock = adapter.get_clock()
         account = adapter.get_account()
@@ -555,7 +574,7 @@ class LiveRunner:
         if check_only:
             from aureum import __version__
 
-            return LiveTradingCertificate.from_run(
+            cert = LiveTradingCertificate.from_run(
                 environment=get_environment(
                     aureum_version=__version__, cwd=self.strategy_path.parent
                 ),
@@ -575,6 +594,8 @@ class LiveRunner:
                 data_sha256=hash_file(self.data_source) if Path(self.data_source).exists() else None,
                 metadata={"check_only": True, "dry_run": False},
             )
+            self._emit_completion(cert)
+            return cert
 
         # Dry-run still goes through the backend so risk checks run.
         self.backend.config.dry_run = dry_run
@@ -585,7 +606,12 @@ class LiveRunner:
             slippage=0.0,
             market_data=self.data,
         )
-        exec_result = self.backend.execute(target, context)
+
+        try:
+            exec_result = self.backend.execute(target, context)
+        except Exception as exc:
+            self._emit_error(exc)
+            raise
 
         post_account = account
         post_positions = pre_positions
@@ -602,7 +628,7 @@ class LiveRunner:
             aureum_version=__version__, cwd=self.strategy_path.parent
         )
 
-        return LiveTradingCertificate.from_run(
+        cert = LiveTradingCertificate.from_run(
             environment=env,
             run_id=run_id,
             strategy_path=str(self.strategy_path),
@@ -623,3 +649,50 @@ class LiveRunner:
             data_sha256=hash_file(self.data_source) if Path(self.data_source).exists() else None,
             metadata={"check_only": False, "dry_run": dry_run},
         )
+        self._emit_completion(cert)
+        return cert
+
+    def _emit(self, notification: Notification) -> None:
+        """Route a notification to the configured sink(s)."""
+        if self.notification_dir is not None:
+            file_and_console(notification, self.notification_dir)
+        else:
+            console_sink(notification)
+
+    def _emit_completion(self, cert: LiveTradingCertificate) -> None:
+        """Emit an info notification when a live run finishes."""
+        self._emit(
+            Notification(
+                run_id=cert.run_id,
+                timestamp=cert.generated_at,
+                level="info",
+                title="Live rebalance complete",
+                body=(
+                    f"mode={cert.live_mode}, orders={len(cert.orders)}, "
+                    f"errors={len(cert.errors)}"
+                ),
+                metadata={
+                    "live_mode": cert.live_mode,
+                    "orders": len(cert.orders),
+                    "errors": len(cert.errors),
+                },
+            )
+        )
+
+    def _emit_error(self, exc: BaseException) -> None:
+        """Emit an error notification and re-raise the original exception."""
+        self._emit(
+            Notification(
+                run_id=self.backend.run_id,
+                timestamp=_now_iso(),
+                level="error",
+                title="Live rebalance failed",
+                body=str(exc),
+                metadata={"exception_type": type(exc).__name__},
+            )
+        )
+
+
+def _now_iso() -> str:
+    """Return the current UTC time as an ISO-8601 string with a trailing Z."""
+    return dt.datetime.now(dt.UTC).isoformat().replace("+00:00", "Z")

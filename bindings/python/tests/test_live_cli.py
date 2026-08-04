@@ -10,7 +10,12 @@ from click.testing import CliRunner
 from aureum.certificate import Environment, LiveTradingCertificate
 from aureum.cli import cli
 from aureum.execution import ExecutionResult
-from aureum.trading import AccountSnapshot, ClockSnapshot, PositionRecord
+from aureum.trading import (
+    AccountSnapshot,
+    AureumTradingError,
+    ClockSnapshot,
+    PositionRecord,
+)
 
 EXAMPLE_STRATEGY = (
     Path(__file__).parents[3] / "examples" / "strategies" / "momentum.yaml"
@@ -111,15 +116,28 @@ def patched_live(monkeypatch, fake_env):
             )
 
     class FakeRunner:
-        def __init__(self, strategy, data, data_source, strategy_path, backend):
+        def __init__(
+            self,
+            strategy,
+            data,
+            data_source,
+            strategy_path,
+            backend,
+            notification_dir=None,
+        ):
             calls["runner"].append(
                 {
                     "strategy_path": str(strategy_path),
                     "data_source": data_source,
+                    "notification_dir": str(notification_dir) if notification_dir else None,
                 }
             )
 
-        def run(self, check_only=False, dry_run=False):
+        def run(self, check_only=False, dry_run=False, kill_switch=None):
+            if kill_switch is not None and Path(kill_switch).exists():
+                raise AureumTradingError(
+                    f"Kill switch is active; exiting without action. ({kill_switch})"
+                )
             return LiveTradingCertificate.from_run(
                 environment=fake_env,
                 run_id="r-1",

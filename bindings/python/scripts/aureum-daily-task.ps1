@@ -35,16 +35,44 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$script:exitCode = 0
+$script:certPath = $null
+$script:logPath = Join-Path $CertificateDir "aureum-daily-task.log"
+
 function Write-Step {
     param([string]$Message)
     Write-Host "[Aureum] $Message" -ForegroundColor Cyan
+}
+
+function Write-Log {
+    param(
+        [string]$Message,
+        [int]$ExitCode = $script:exitCode,
+        [string]$CertificatePath = $script:certPath
+    )
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $line = "$timestamp | $Message | exit_code=$ExitCode"
+    if ($CertificatePath) {
+        $line += " | certificate=$CertificatePath"
+    }
+    Add-Content -Path $script:logPath -Value $line -Encoding utf8
+}
+
+# ---------------------------------------------------------------------------
+# Ensure output directory and log file exist
+# ---------------------------------------------------------------------------
+New-Item -ItemType Directory -Force -Path $CertificateDir | Out-Null
+if (-not (Test-Path $script:logPath)) {
+    New-Item -ItemType File -Path $script:logPath -Force | Out-Null
 }
 
 # ---------------------------------------------------------------------------
 # Kill switch
 # ---------------------------------------------------------------------------
 if (Test-Path $KillSwitch) {
-    Write-Step "Kill switch present at $KillSwitch; exiting without action."
+    $msg = "Kill switch present at $KillSwitch; exiting without action."
+    Write-Step $msg
+    Write-Log -Message $msg
     exit 0
 }
 
@@ -62,10 +90,13 @@ if (Test-Path $EnvFile) {
             $value = $_.Matches.Groups[2].Value.Trim()
             [Environment]::SetEnvironmentVariable($name, $value, "Process")
         }
+    Write-Log -Message "Loaded environment from $EnvFile"
 }
 
 if (-not $env:ALPACA_API_KEY -or -not $env:ALPACA_SECRET_KEY) {
-    throw "ALPACA_API_KEY and ALPACA_SECRET_KEY must be set in $EnvFile or the environment."
+    $msg = "ALPACA_API_KEY and ALPACA_SECRET_KEY must be set in $EnvFile or the environment."
+    Write-Log -Message $msg -ExitCode 1
+    throw $msg
 }
 
 # ---------------------------------------------------------------------------
@@ -84,7 +115,7 @@ Set-Location $repoRoot
 # ---------------------------------------------------------------------------
 New-Item -ItemType Directory -Force -Path $CertificateDir | Out-Null
 $timestamp = Get-Date -Format "yyyy-MM-dd-HHmm"
-$certPath = Join-Path $CertificateDir "live-$timestamp.json"
+$script:certPath = Join-Path $CertificateDir "live-$timestamp.json"
 
 $sharedArgs = @("--paper")
 if ($DryRun -or $IgnoreMarketHours) { $sharedArgs += "--ignore-market-hours" }
@@ -94,7 +125,13 @@ if ($DryRun -or $IgnoreMarketHours) { $sharedArgs += "--ignore-market-hours" }
 # ---------------------------------------------------------------------------
 Write-Step "Running account snapshot"
 & python -m aureum.cli account @sharedArgs
-if ($LASTEXITCODE -ne 0) { throw "aureum account failed with exit code $LASTEXITCODE" }
+$script:exitCode = $LASTEXITCODE
+if ($script:exitCode -ne 0) {
+    $msg = "aureum account failed with exit code $script:exitCode"
+    Write-Log -Message $msg -ExitCode $script:exitCode
+    throw $msg
+}
+Write-Log -Message "Account snapshot completed" -ExitCode $script:exitCode
 
 # ---------------------------------------------------------------------------
 # Live rebalance
@@ -103,7 +140,7 @@ $liveArgs = @(
     "live",
     (Resolve-Path $Strategy).Path,
     "--data", (Resolve-Path $Data).Path,
-    "--certificate", $certPath
+    "--certificate", $script:certPath
 ) + $sharedArgs
 if ($DryRun) { $liveArgs += "--dry-run" }
 
@@ -114,7 +151,13 @@ if (-not $DryRun -and -not $IgnoreMarketHours) {
 
 Write-Step "Running aureum live"
 & python -m aureum.cli @liveArgs
-if ($LASTEXITCODE -ne 0) { throw "aureum live failed with exit code $LASTEXITCODE" }
+$script:exitCode = $LASTEXITCODE
+if ($script:exitCode -ne 0) {
+    $msg = "aureum live failed with exit code $script:exitCode"
+    Write-Log -Message $msg -ExitCode $script:exitCode -CertificatePath $script:certPath
+    throw $msg
+}
+Write-Log -Message "Live rebalance completed" -ExitCode $script:exitCode -CertificatePath $script:certPath
 
 # ---------------------------------------------------------------------------
 # Optional git commit/push
@@ -124,6 +167,9 @@ if ($env:AUREUM_GIT_PUSH -eq "true") {
     git add memory/ $CertificateDir
     git commit -m "aureum: daily live run $timestamp" --allow-empty
     git push origin main
+    Write-Log -Message "Git commit/push completed" -ExitCode $script:exitCode -CertificatePath $script:certPath
 }
 
-Write-Step "Daily task complete. Certificate written to $certPath"
+$doneMsg = "Daily task complete. Certificate written to $script:certPath"
+Write-Step $doneMsg
+Write-Log -Message "Daily task complete" -ExitCode $script:exitCode -CertificatePath $script:certPath

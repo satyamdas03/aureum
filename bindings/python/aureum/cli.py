@@ -630,10 +630,6 @@ def live(
     min_order_notional: float | None,
 ) -> None:
     """Run a single live Alpaca paper-trading rebalance for a strategy."""
-    if kill_switch and kill_switch.exists():
-        click.echo("Kill switch is active; exiting without action.")
-        return
-
     strat = Strategy.from_file(strategy)
     errors = strat.validate()
     if errors:
@@ -668,14 +664,22 @@ def live(
         data_source=str(data),
         strategy_path=strategy,
         backend=backend,
+        notification_dir=str(certificate.parent),
     )
 
     try:
-        cert = runner.run(check_only=check_only, dry_run=dry_run)
+        cert = runner.run(
+            check_only=check_only,
+            dry_run=dry_run,
+            kill_switch=kill_switch,
+        )
     except MarketClosedError as exc:
         click.echo(f"Market closed: {exc}")
         raise click.Abort() from exc
     except AureumTradingError as exc:
+        if "Kill switch is active" in str(exc):
+            click.echo("Kill switch is active; exiting without action.")
+            return
         click.echo(f"Trading error: {exc}")
         raise click.Abort() from exc
 
