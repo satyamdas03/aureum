@@ -22,6 +22,7 @@ import StrategyEditor from "./StrategyEditor";
 import CertificateSeal from "./CertificateSeal";
 import BacktestChart from "./BacktestChart";
 import Phase4Lineage from "./Phase4Lineage";
+import LiveTradingPanel from "./LiveTradingPanel";
 
 const DEFAULT_STRATEGY = `apiVersion: aureum.io/v1alpha1
 kind: Strategy
@@ -441,6 +442,13 @@ export default function Dashboard() {
 
           {/* Phase 4 lineage */}
           {certificate && <Phase4Lineage certificate={certificate} />}
+
+          {/* Live trading */}
+          <LiveTradingPanel
+            strategyYaml={yaml}
+            dataPath={dataPath}
+            disabled={loading}
+          />
 
           {/* Error */}
           {error && (

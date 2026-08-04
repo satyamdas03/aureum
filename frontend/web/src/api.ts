@@ -1,4 +1,4 @@
-import type { Certificate, DataFile, Example } from "./types";
+import type { Certificate, DataFile, Example, LiveCertificate } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -34,6 +34,27 @@ export const api = {
     fetchJson<Certificate>("/api/backtest", {
       method: "POST",
       body: JSON.stringify({ strategy_yaml: strategyYaml, data_path: dataPath }),
+    }),
+
+  live: (
+    strategyYaml: string,
+    dataPath: string,
+    options: {
+      dry_run?: boolean;
+      check_only?: boolean;
+      ignore_market_hours?: boolean;
+      max_single_position_pct?: number;
+      max_total_invested_pct?: number;
+      min_order_notional?: number;
+    } = {}
+  ) =>
+    fetchJson<LiveCertificate>("/api/live", {
+      method: "POST",
+      body: JSON.stringify({
+        strategy_yaml: strategyYaml,
+        data_path: dataPath,
+        ...options,
+      }),
     }),
 
   reflect: (

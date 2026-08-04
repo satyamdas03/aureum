@@ -70,6 +70,40 @@ export interface KnowledgeGraph {
   relations?: Array<Record<string, unknown>>;
 }
 
+export interface LiveOrder {
+  symbol: string;
+  side: string;
+  delta_qty?: number;
+  target_qty?: number;
+  estimated_notional?: number;
+  dry_run?: boolean;
+  qty_filled?: number;
+  filled_avg_price?: number;
+  status?: string;
+  [key: string]: unknown;
+}
+
+export interface LiveCertificate {
+  aureum_version: string;
+  certificate_spec_version: string;
+  generated_at: string;
+  run_id: string;
+  live_mode: string;
+  strategy_path: string;
+  strategy_sha256: string;
+  data_path: string | null;
+  data_sha256: string | null;
+  market_clock: Record<string, unknown>;
+  pre_trade_account: Record<string, unknown>;
+  post_trade_account: Record<string, unknown>;
+  target_portfolio: Record<string, unknown>;
+  current_positions: Array<Record<string, unknown>>;
+  orders: LiveOrder[];
+  risk_checks: Array<Record<string, unknown>>;
+  errors: string[];
+  metadata: Record<string, unknown>;
+}
+
 export interface Certificate {
   aureum_version: string;
   generated_at: string;

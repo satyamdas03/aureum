@@ -23,8 +23,14 @@ from aureum.ai import DEFAULT_MODEL
 from aureum.author import StrategyAuthor
 from aureum.backtest import _SIGNALS, BacktestRunner, MarketData
 from aureum.certificate import get_environment
+from aureum.execution import (
+    AlpacaPaperExecutionBackend,
+    LiveRunner,
+    LiveTradingConfig,
+)
 from aureum.reflector import StrategyReflector
 from aureum.strategy import Strategy
+from aureum.trading import AlpacaTradingAdapter
 
 app = FastAPI(
     title="Aureum",
@@ -61,6 +67,17 @@ class AuthorResponse(BaseModel):
 class BacktestRequest(BaseModel):
     strategy_yaml: str
     data_path: str
+
+
+class LiveRequest(BaseModel):
+    strategy_yaml: str
+    data_path: str
+    dry_run: bool = True
+    check_only: bool = False
+    ignore_market_hours: bool = False
+    max_single_position_pct: float | None = None
+    max_total_invested_pct: float | None = None
+    min_order_notional: float | None = None
 
 
 class ReflectRequest(BaseModel):
@@ -157,6 +174,48 @@ def backtest(request: BacktestRequest) -> dict[str, Any]:
             data_path=data_path,
             environment=env,
         )
+        return cert.to_dict()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/live")
+def live(request: LiveRequest) -> dict[str, Any]:
+    try:
+        strategy = Strategy.from_yaml(request.strategy_yaml)
+        data_path = _data_path(request.data_path)
+        tmp_strategy = _DATA_DIR / ".live-in.yaml"
+        tmp_strategy.write_text(request.strategy_yaml, encoding="utf-8")
+        data = MarketData.from_csv(data_path)
+
+        overrides: dict[str, float] = {}
+        if request.max_single_position_pct is not None:
+            overrides["max_single_position_pct"] = request.max_single_position_pct
+        if request.max_total_invested_pct is not None:
+            overrides["max_total_invested_pct"] = request.max_total_invested_pct
+        if request.min_order_notional is not None:
+            overrides["min_order_notional"] = request.min_order_notional
+
+        config = LiveTradingConfig.from_strategy_spec(strategy.spec, overrides=overrides)
+        config.dry_run = request.dry_run
+        config.market_open_required = not request.ignore_market_hours
+        config.paper = True
+
+        adapter = AlpacaTradingAdapter(
+            paper=True,
+            market_open_required=not request.ignore_market_hours,
+        )
+        backend = AlpacaPaperExecutionBackend(adapter, config)
+        runner = LiveRunner(
+            strategy=strategy,
+            data=data,
+            data_source=str(data_path),
+            strategy_path=tmp_strategy,
+            backend=backend,
+        )
+        cert = runner.run(check_only=request.check_only, dry_run=request.dry_run)
         return cert.to_dict()
     except HTTPException:
         raise
