@@ -189,6 +189,84 @@ def test_paper_backend_dry_run_returns_intended_orders(monkeypatch):
     assert result.orders[0]["dry_run"] is True
 
 
+def test_paper_backend_liquidates_positions_not_in_target(monkeypatch):
+    adapter = _fake_adapter(monkeypatch)
+    monkeypatch.setattr(
+        adapter, "get_account", lambda: _fake_account(equity=100_000.0, cash=80_000.0)
+    )
+    monkeypatch.setattr(
+        adapter,
+        "get_positions",
+        lambda: [
+            PositionRecord(
+                symbol="AAPL",
+                qty=10.0,
+                side="long",
+                market_value=1_850.0,
+                avg_entry_price=180.0,
+                current_price=185.0,
+                cost_basis=1_800.0,
+                unrealized_pl=50.0,
+            ),
+            PositionRecord(
+                symbol="OLD",
+                qty=50.0,
+                side="long",
+                market_value=5_000.0,
+                avg_entry_price=95.0,
+                current_price=100.0,
+                cost_basis=4_750.0,
+                unrealized_pl=250.0,
+            ),
+        ],
+    )
+
+    submitted: list[dict] = []
+
+    def fake_submit_market_order(symbol, qty, side, client_order_id, **kwargs):
+        submitted.append({"symbol": symbol, "qty": qty, "side": side})
+        return OrderRecord(
+            client_order_id=client_order_id,
+            alpaca_order_id="o-1",
+            symbol=symbol,
+            side=side,
+            status="filled",
+            qty_requested=qty,
+            notional_requested=None,
+            qty_filled=qty,
+            filled_avg_price=185.0 if symbol == "AAPL" else 100.0,
+            submitted_at="2024-01-01T10:00:00Z",
+            updated_at="2024-01-01T10:00:01Z",
+            raw={},
+        )
+
+    monkeypatch.setattr(adapter, "submit_market_order", fake_submit_market_order)
+
+    config = LiveTradingConfig(
+        min_order_notional=50.0, use_notional_orders=False, market_open_required=False
+    )
+    backend = AlpacaPaperExecutionBackend(adapter, config, run_id="run1")
+
+    target = TargetPortfolio(
+        date=dt.date(2024, 1, 1),
+        target_values={"AAPL": 5_000.0},
+        target_weights={"AAPL": 0.05},
+        prices={"AAPL": 185.0},
+    )
+    context = ExecutionContext(
+        date=dt.date(2024, 1, 1),
+        current_positions={"AAPL": 10.0, "OLD": 50.0},
+        cash=80_000.0,
+        slippage=0.0,
+    )
+    result = backend.execute(target, context)
+
+    symbols = {o["symbol"] for o in submitted}
+    assert "OLD" in symbols
+    assert any(o["side"] == "sell" and o["symbol"] == "OLD" for o in submitted)
+    assert result.trades == 2
+
+
 def test_paper_backend_blocks_oversized_target(monkeypatch):
     adapter = _fake_adapter(monkeypatch)
     monkeypatch.setattr(
@@ -244,3 +322,35 @@ def test_live_runner_check_only_produces_certificate(monkeypatch, tmp_path: Path
     assert cert.strategy_sha256
     assert cert.errors == []
     assert cert.orders == []
+
+
+def test_live_runner_dry_run_includes_intended_orders_in_certificate(monkeypatch):
+    strategy = Strategy.from_file(EXAMPLE_STRATEGY)
+    data = MarketData.from_csv(EXAMPLE_DATA)
+    adapter = _fake_adapter(monkeypatch)
+    monkeypatch.setattr(
+        adapter, "get_account", lambda: _fake_account(equity=1_000_000.0, cash=900_000.0)
+    )
+    monkeypatch.setattr(adapter, "get_positions", list)
+    monkeypatch.setattr(
+        adapter, "get_clock", lambda: MagicMock(is_open=True, to_dict=dict)
+    )
+
+    config = LiveTradingConfig(
+        market_open_required=False,
+        dry_run=True,
+        max_single_position_pct=0.5,
+        max_total_invested_pct=1.0,
+    )
+    backend = AlpacaPaperExecutionBackend(adapter, config, run_id="run1")
+    runner = LiveRunner(
+        strategy=strategy,
+        data=data,
+        data_source=str(EXAMPLE_DATA),
+        strategy_path=EXAMPLE_STRATEGY,
+        backend=backend,
+    )
+    cert = runner.run(dry_run=True)
+    assert cert.live_mode == "paper-dry-run"
+    assert cert.orders
+    assert all(o.get("dry_run") is True for o in cert.orders)

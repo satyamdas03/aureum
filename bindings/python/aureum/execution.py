@@ -287,7 +287,8 @@ class AlpacaPaperExecutionBackend:
         current_by_symbol = {p.symbol: p.qty for p in pre_positions}
 
         target_values = dict(target.target_values)
-        prices = target.prices
+        prices = dict(target.prices)
+        current_prices = {p.symbol: p.current_price for p in pre_positions}
 
         # 1. Validate target values fit within guardrails.
         errors = self._validate_guardrails(target_values, account)
@@ -303,14 +304,22 @@ class AlpacaPaperExecutionBackend:
                 errors=errors,
             )
 
-        # 2. Compute target quantities and deltas.
+        # 2. Compute target quantities and deltas for all relevant symbols.
+        #    This includes target buys/sells AND liquidating positions not in target.
+        relevant_symbols = set(target_values.keys()) | set(current_by_symbol.keys())
         deltas: list[tuple[str, float, float]] = []  # symbol, delta_qty, target_qty
-        for symbol, value in target_values.items():
-            price = prices.get(symbol)
+        for symbol in relevant_symbols:
+            price = prices.get(symbol) or current_prices.get(symbol)
             if price is None or price <= 0:
+                if symbol in current_by_symbol:
+                    errors.append(
+                        f"Cannot liquidate {symbol}: no price in target.prices or position record"
+                    )
                 continue
+            prices[symbol] = price
             current_qty = current_by_symbol.get(symbol, 0.0)
-            target_qty = value / price
+            target_value = target_values.get(symbol, 0.0)
+            target_qty = target_value / price
             delta = target_qty - current_qty
             notional = abs(delta * price)
             if notional < self.config.min_order_notional:
@@ -593,7 +602,10 @@ class LiveRunner:
             post_trade_account=post_account.to_dict(),
             target_portfolio=target.to_dict(),
             current_positions=[p.to_dict() for p in post_positions],
-            orders=[o.to_dict() for o in exec_result.orders if isinstance(o, OrderRecord)],
+            orders=[
+                o.to_dict() if isinstance(o, OrderRecord) else dict(o)
+                for o in exec_result.orders
+            ],
             risk_checks=[],  # populated by backend errors are not structured risk checks
             errors=list(exec_result.errors),
             data_path=self.data_source,

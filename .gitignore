@@ -51,6 +51,7 @@ data/
 *.[0-9][0-9][0-9].yaml
 .backtest-*.yaml
 .reflect-*.yaml
+live-certificates/
 
 # Allow committed example data and its generator.
 !examples/data/
