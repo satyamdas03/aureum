@@ -37,7 +37,8 @@ $ErrorActionPreference = "Stop"
 
 $script:exitCode = 0
 $script:certPath = $null
-$script:logPath = Join-Path $CertificateDir "aureum-daily-task.log"
+
+Write-Host "[Aureum] Starting daily task from PSScriptRoot=$PSScriptRoot" -ForegroundColor Cyan
 
 function Write-Step {
     param([string]$Message)
@@ -62,6 +63,8 @@ function Write-Log {
 # Ensure output directory and log file exist
 # ---------------------------------------------------------------------------
 New-Item -ItemType Directory -Force -Path $CertificateDir | Out-Null
+$certDir = Resolve-Path $CertificateDir
+$script:logPath = Join-Path $certDir "aureum-daily-task.log"
 if (-not (Test-Path $script:logPath)) {
     New-Item -ItemType File -Path $script:logPath -Force | Out-Null
 }
@@ -83,13 +86,13 @@ $repoRoot = Resolve-Path "$PSScriptRoot\..\..\.."
 
 if (Test-Path $EnvFile) {
     Write-Step "Loading environment from $EnvFile"
-    Get-Content $EnvFile |
-        Where-Object { $_ -match '^\s*([^#\s][^=]*)\s*=\s*(.*)$' } |
-        ForEach-Object {
-            $name = $_.Matches.Groups[1].Value.Trim()
-            $value = $_.Matches.Groups[2].Value.Trim()
+    Get-Content $EnvFile | ForEach-Object {
+        if ($_ -match '^\s*([^#\s][^=]*)\s*=\s*(.*)$') {
+            $name = $Matches[1].Trim()
+            $value = $Matches[2].Trim()
             [Environment]::SetEnvironmentVariable($name, $value, "Process")
         }
+    }
     Write-Log -Message "Loaded environment from $EnvFile"
 }
 
@@ -111,11 +114,10 @@ if (Test-Path $venv) {
 Set-Location $repoRoot
 
 # ---------------------------------------------------------------------------
-# Ensure output directory and build certificate path
+# Build certificate path in the resolved certificate directory
 # ---------------------------------------------------------------------------
-New-Item -ItemType Directory -Force -Path $CertificateDir | Out-Null
 $timestamp = Get-Date -Format "yyyy-MM-dd-HHmm"
-$script:certPath = Join-Path $CertificateDir "live-$timestamp.json"
+$script:certPath = Join-Path $certDir "live-$timestamp.json"
 
 $sharedArgs = @("--paper")
 if ($DryRun -or $IgnoreMarketHours) { $sharedArgs += "--ignore-market-hours" }
