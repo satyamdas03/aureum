@@ -14,6 +14,13 @@
     09:30 equity market open so market-open checks pass.
 .PARAMETER DaysOfWeek
     Comma-separated list of weekdays to run (default: Monday through Friday).
+.PARAMETER SubmitOrders
+    Register the task to submit real orders. The default task is dry-run.
+.PARAMETER MaxTotalInvestedPct
+    Maximum total invested notional as a fraction of equity (0.0 means use
+    the strategy's configured value).
+.PARAMETER IgnoreMarketHours
+    Allow the task to run outside market hours.
 #>
 param(
     [string]$TaskName = "AureumDailyPaperTrading",
@@ -22,7 +29,8 @@ param(
     [string]$Data = "$PSScriptRoot\..\..\examples\data\alpaca_tech_snapshot.csv",
     [string]$RunTime = "23:35",
     [string]$DaysOfWeek = "Monday,Tuesday,Wednesday,Thursday,Friday",
-    [switch]$DryRun,
+    [switch]$SubmitOrders,
+    [double]$MaxTotalInvestedPct = 0.0,
     [switch]$IgnoreMarketHours
 )
 
@@ -35,7 +43,10 @@ $resolvedStrategy = Resolve-Path $Strategy
 $resolvedData = Resolve-Path $Data
 
 $argumentString = "-ExecutionPolicy Bypass -File `"$($resolvedScript.Path)`" -Strategy `"$($resolvedStrategy.Path)`" -Data `"$($resolvedData.Path)`""
-if ($DryRun) { $argumentString += " -DryRun" }
+if ($SubmitOrders) { $argumentString += " -SubmitOrders" }
+if ($MaxTotalInvestedPct -gt 0.0) {
+    $argumentString += " -MaxTotalInvestedPct $MaxTotalInvestedPct"
+}
 if ($IgnoreMarketHours) { $argumentString += " -IgnoreMarketHours" }
 
 $action = New-ScheduledTaskAction `
@@ -61,7 +72,7 @@ Register-ScheduledTask `
     -Settings $settings `
     -Force
 
-$mode = if ($DryRun) { "dry-run" } else { "live paper" }
+$mode = if ($SubmitOrders) { "live paper" } else { "dry-run" }
 Write-Host "Registered scheduled task '$TaskName' to run at $RunTime local time on $DaysOfWeek."
 Write-Host "Strategy: $resolvedStrategy"
 Write-Host "Data:     $resolvedData"

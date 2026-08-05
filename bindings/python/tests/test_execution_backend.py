@@ -267,22 +267,25 @@ def test_paper_backend_liquidates_positions_not_in_target(monkeypatch):
     assert result.trades == 2
 
 
-def test_paper_backend_blocks_oversized_target(monkeypatch):
+def test_paper_backend_scales_target_to_max_total_invested_pct(monkeypatch):
     adapter = _fake_adapter(monkeypatch)
     monkeypatch.setattr(
         adapter, "get_account", lambda: _fake_account(equity=100_000.0)
     )
     monkeypatch.setattr(adapter, "get_positions", list)
     config = LiveTradingConfig(
-        max_total_invested_pct=0.5, market_open_required=False
+        max_total_invested_pct=0.5,
+        max_single_position_pct=0.5,
+        dry_run=True,
+        market_open_required=False,
     )
     backend = AlpacaPaperExecutionBackend(adapter, config, run_id="run1")
 
     target = TargetPortfolio(
         date=dt.date(2024, 1, 1),
-        target_values={"AAPL": 60_000.0},
-        target_weights={"AAPL": 0.6},
-        prices={"AAPL": 100.0},
+        target_values={"AAPL": 30_000.0, "MSFT": 30_000.0},
+        target_weights={"AAPL": 0.3, "MSFT": 0.3},
+        prices={"AAPL": 100.0, "MSFT": 100.0},
     )
     context = ExecutionContext(
         date=dt.date(2024, 1, 1),
@@ -291,9 +294,15 @@ def test_paper_backend_blocks_oversized_target(monkeypatch):
         slippage=0.0,
     )
     result = backend.execute(target, context)
-    assert len(result.errors) > 0
-    assert "exceeds" in result.errors[0]
-    assert result.trades == 0
+    assert result.errors == []
+    assert result.trades == 0  # dry-run is False, but no orders submitted in test
+    # Deltas reflect scaled target: total $60k scaled to $50k (0.5 * equity).
+    aapl_order = next(o for o in result.orders if o["symbol"] == "AAPL")
+    msft_order = next(o for o in result.orders if o["symbol"] == "MSFT")
+    assert aapl_order["target_qty"] == pytest.approx(250.0)
+    assert msft_order["target_qty"] == pytest.approx(250.0)
+    assert target.target_values["AAPL"] == pytest.approx(25_000.0)
+    assert target.target_weights["AAPL"] == pytest.approx(0.25)
 
 
 def test_live_runner_check_only_produces_certificate(monkeypatch, tmp_path: Path):

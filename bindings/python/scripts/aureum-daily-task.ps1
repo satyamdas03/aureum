@@ -6,12 +6,16 @@
     Loads a local .env file, sanity-checks Alpaca credentials, runs an account
     snapshot, then runs the configured strategy via ``aureum live``.  If
     AUREUM_GIT_PUSH is true, it commits memory/ and live-certificates/.
-.PARAMETER DryRun
-    Print intended orders without submitting them.
+.PARAMETER SubmitOrders
+    Submit real orders to Alpaca. The default behaviour is a safe dry-run.
+    Use this only after a successful preflight dry-run and during market hours.
 .PARAMETER IgnoreMarketHours
     Run even when the market is closed (useful for dry-run validation). When
     not set, the task will abort if the market is closed, which is the safe
     default for real money-adjacent paper trading.
+.PARAMETER MaxTotalInvestedPct
+    Maximum total invested notional as a fraction of equity (0.0 means use
+    the strategy's configured value).
 .PARAMETER EnvFile
     Path to a key=value environment file.
 .PARAMETER Strategy
@@ -29,7 +33,8 @@ param(
     [string]$Data = "$PSScriptRoot\..\..\examples\data\synthetic_prices.csv",
     [string]$CertificateDir = "$PSScriptRoot\..\..\..\live-certificates",
     [string]$KillSwitch = "$PSScriptRoot\kill.switch",
-    [switch]$DryRun,
+    [switch]$SubmitOrders,
+    [double]$MaxTotalInvestedPct = 0.0,
     [switch]$IgnoreMarketHours
 )
 
@@ -120,7 +125,7 @@ $timestamp = Get-Date -Format "yyyy-MM-dd-HHmm"
 $script:certPath = Join-Path $certDir "live-$timestamp.json"
 
 $sharedArgs = @("--paper")
-if ($DryRun -or $IgnoreMarketHours) { $sharedArgs += "--ignore-market-hours" }
+if ($IgnoreMarketHours) { $sharedArgs += "--ignore-market-hours" }
 
 # ---------------------------------------------------------------------------
 # Account snapshot (always run first as a health check)
@@ -144,11 +149,18 @@ $liveArgs = @(
     "--data", (Resolve-Path $Data).Path,
     "--certificate", $script:certPath
 ) + $sharedArgs
-if ($DryRun) { $liveArgs += "--dry-run" }
+if ($SubmitOrders) { $liveArgs += "--submit-orders" }
+if ($MaxTotalInvestedPct -gt 0.0) {
+    $liveArgs += "--max-total-invested-pct"
+    $liveArgs += $MaxTotalInvestedPct
+}
 
-# If not a dry run, respect market hours unless explicitly overridden.
-if (-not $DryRun -and -not $IgnoreMarketHours) {
+# If submitting orders, respect market hours unless explicitly overridden.
+if ($SubmitOrders -and -not $IgnoreMarketHours) {
     Write-Step "Market-hours check enabled; task will abort if market is closed."
+}
+if (-not $SubmitOrders) {
+    Write-Step "DRY-RUN mode: no orders will be submitted."
 }
 
 Write-Step "Running aureum live"

@@ -69,7 +69,9 @@ def validate(path: Path) -> None:
     type=click.Path(path_type=Path),
     help="Data CSV for optional dry-run backtest",
 )
-@click.option("--dry-run", is_flag=True, help="Run a dry-run backtest and emit certificate")
+@click.option(
+    "--dry-run", is_flag=True, help="Run a dry-run backtest and emit certificate"
+)
 @click.option("--model", default="claude-sonnet-5", help="Anthropic model name")
 @click.option(
     "--max-correction-attempts",
@@ -159,7 +161,10 @@ def alpha(
         strategy_data = {
             "apiVersion": "aureum.io/v1alpha1",
             "kind": "Strategy",
-            "metadata": {"name": name, "description": f"LLM-generated neuro-symbolic alpha: {prompt}"},
+            "metadata": {
+                "name": name,
+                "description": f"LLM-generated neuro-symbolic alpha: {prompt}",
+            },
             "spec": {
                 "signals": {
                     "alpha": {
@@ -298,9 +303,7 @@ def backtest(
         raise click.Abort()
 
     if graph not in {"none", "inline", "bundle"}:
-        click.echo(
-            f"Error: --graph must be one of none, inline, bundle; got '{graph}'"
-        )
+        click.echo(f"Error: --graph must be one of none, inline, bundle; got '{graph}'")
         raise click.Abort()
 
     graph_persistence = strategy.graph_persistence()
@@ -324,7 +327,13 @@ def backtest(
         strategy_path=path,
     )
 
-    if certificate or bundle or smt or lean or graph_persistence in {"inline", "bundle"}:
+    if (
+        certificate
+        or bundle
+        or smt
+        or lean
+        or graph_persistence in {"inline", "bundle"}
+    ):
         env = get_environment(aureum_version=__version__, cwd=path.parent)
         contract_paths: list[tuple[str, str]] = []
         cert = runner.build_certificate(
@@ -366,7 +375,9 @@ def backtest(
             graph_path = bundle.with_suffix(".graph.json")
 
         if graph_path is not None and cert.knowledge_graph is not None:
-            graph_path.write_text(cert.knowledge_graph.to_json(indent=2), encoding="utf-8")
+            graph_path.write_text(
+                cert.knowledge_graph.to_json(indent=2), encoding="utf-8"
+            )
             cert_dict["graph_path"] = str(graph_path)
             cert_dict["graph_sha256"] = hash_file(graph_path)
             cert_json = json.dumps(cert_dict, indent=2, default=str, sort_keys=False)
@@ -387,7 +398,9 @@ def backtest(
             arch_file = repo_root / portfolio_spec["model"]["architecture_file"]
             extra_files.append((arch_file, "model_architecture.yaml"))
             if runner._diffopt and runner._diffopt.weights_path:
-                extra_files.append((runner._diffopt.weights_path, "trained_weights.npz"))
+                extra_files.append(
+                    (runner._diffopt.weights_path, "trained_weights.npz")
+                )
 
         if bundle:
             _write_bundle(bundle, path, data, cert_json, extra_files=extra_files)
@@ -413,9 +426,16 @@ def backtest(
 
 @cli.command()
 @click.argument("strategy", type=click.Path(exists=True, path_type=Path))
-@click.option("--data", required=True, type=click.Path(exists=True, path_type=Path), help="Price CSV")
+@click.option(
+    "--data",
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Price CSV",
+)
 @click.option("--output", type=click.Path(path_type=Path), help="Output frontier JSON")
-@click.option("--n-points", default=20, show_default=True, help="Number of frontier points")
+@click.option(
+    "--n-points", default=20, show_default=True, help="Number of frontier points"
+)
 def frontier(strategy: Path, data: Path, output: Path | None, n_points: int) -> None:
     """Compute the mean-variance efficient frontier for a portfolio strategy."""
     strat = Strategy.from_file(strategy)
@@ -455,7 +475,9 @@ def frontier(strategy: Path, data: Path, output: Path | None, n_points: int) -> 
     np = __import__("numpy")
     returns_arr = np.array(returns_matrix).T
     mu = estimate_mean_returns(returns_arr, method="sample")
-    cov = estimate_covariance(returns_arr, estimator=portfolio_spec.get("covariance_estimator", "sample"))
+    cov = estimate_covariance(
+        returns_arr, estimator=portfolio_spec.get("covariance_estimator", "sample")
+    )
     inputs = OptimizationInputs(
         expected_returns=mu,
         covariance=cov,
@@ -502,7 +524,9 @@ def frontier(strategy: Path, data: Path, output: Path | None, n_points: int) -> 
 )
 @click.option("--feed", default="iex", help="Alpaca data feed (iex, sip)")
 @click.option("--timeframe", default="1Day", help="Bar timeframe")
-def snapshot(symbols: str, start: str, end: str, output: Path, feed: str, timeframe: str) -> None:
+def snapshot(
+    symbols: str, start: str, end: str, output: Path, feed: str, timeframe: str
+) -> None:
     """Fetch a versionable Alpaca price snapshot and save it as CSV."""
     import datetime as dt
 
@@ -589,7 +613,12 @@ def account(paper: bool, ignore_market_hours: bool, kill_switch: Path | None) ->
 @click.option(
     "--dry-run",
     is_flag=True,
-    help="Print intended orders but do not submit them",
+    help="Print intended orders but do not submit them (default behaviour)",
+)
+@click.option(
+    "--submit-orders",
+    is_flag=True,
+    help="Submit real orders to Alpaca. Only use after a successful preflight dry-run.",
 )
 @click.option(
     "--ignore-market-hours",
@@ -609,7 +638,8 @@ def account(paper: bool, ignore_market_hours: bool, kill_switch: Path | None) ->
 @click.option(
     "--max-total-invested-pct",
     type=float,
-    help="Maximum total invested notional as a fraction of equity",
+    default=None,
+    help="Maximum total invested notional as a fraction of equity (default: use strategy value)",
 )
 @click.option(
     "--min-order-notional",
@@ -623,6 +653,7 @@ def live(
     paper: bool,
     check_only: bool,
     dry_run: bool,
+    submit_orders: bool,
     ignore_market_hours: bool,
     kill_switch: Path | None,
     max_single_position_pct: float | None,
@@ -647,8 +678,19 @@ def live(
     if min_order_notional is not None:
         overrides["min_order_notional"] = min_order_notional
 
+    # Default to dry-run unless the operator explicitly opts in with --submit-orders.
+    # Passing --dry-run always keeps the run safe, even if --submit-orders is present.
+    effective_dry_run = dry_run or not submit_orders
+
+    if submit_orders and paper:
+        click.echo("[Aureum] SUBMITTING REAL PAPER ORDERS")
+        if not ignore_market_hours:
+            click.echo(
+                "[Aureum] Market-hours check enabled; aborting if market is closed."
+            )
+
     config = LiveTradingConfig.from_strategy_spec(strat.spec, overrides=overrides)
-    config.dry_run = dry_run
+    config.dry_run = effective_dry_run
     config.market_open_required = not ignore_market_hours
     config.paper = paper
 
@@ -670,7 +712,7 @@ def live(
     try:
         cert = runner.run(
             check_only=check_only,
-            dry_run=dry_run,
+            dry_run=effective_dry_run,
             kill_switch=kill_switch,
         )
     except MarketClosedError as exc:

@@ -330,7 +330,22 @@ class AlpacaPaperExecutionBackend:
         prices = dict(target.prices)
         current_prices = {p.symbol: p.current_price for p in pre_positions}
 
-        # 1. Validate target values fit within guardrails.
+        # 1. Scale target values/weights to respect the total-invested cap.
+        #    Mutate the caller's TargetPortfolio so the certificate reflects the
+        #    actual scaled target rather than the raw optimizer output.
+        if account.equity > 0:
+            total_target = sum(target_values.values())
+            max_total = account.equity * self.config.max_total_invested_pct
+            if total_target > max_total + 1e-6:
+                scale = max_total / total_target
+                target_values = {s: v * scale for s, v in target_values.items()}
+                target.target_values = target_values
+                if target.target_weights:
+                    target.target_weights = {
+                        s: w * scale for s, w in target.target_weights.items()
+                    }
+
+        # 2. Validate target values fit within guardrails.
         errors = self._validate_guardrails(target_values, account)
         if errors:
             return ExecutionResult(
@@ -344,7 +359,7 @@ class AlpacaPaperExecutionBackend:
                 errors=errors,
             )
 
-        # 2. Compute target quantities and deltas for all relevant symbols.
+        # 3. Compute target quantities and deltas for all relevant symbols.
         #    This includes target buys/sells AND liquidating positions not in target.
         relevant_symbols = set(target_values.keys()) | set(current_by_symbol.keys())
         deltas: list[tuple[str, float, float]] = []  # symbol, delta_qty, target_qty
@@ -377,7 +392,7 @@ class AlpacaPaperExecutionBackend:
                 pre_trade_positions=pre_positions,
             )
 
-        # 3. In dry-run mode, return intended orders without submitting.
+        # 4. In dry-run mode, return intended orders without submitting.
         if self.config.dry_run:
             intended_orders = [
                 {
@@ -401,7 +416,7 @@ class AlpacaPaperExecutionBackend:
                 errors=[],
             )
 
-        # 4. Submit orders with deterministic client order IDs.
+        # 5. Submit orders with deterministic client order IDs.
         submitted: list[OrderRecord] = []
         for symbol, delta, _target_qty in deltas:
             side = "buy" if delta > 0 else "sell"
@@ -426,10 +441,10 @@ class AlpacaPaperExecutionBackend:
             except AureumTradingError as exc:
                 errors.append(f"{symbol}: {exc}")
 
-        # 5. Poll fills up to the configured timeout.
+        # 6. Poll fills up to the configured timeout.
         polled = self._poll_fills(submitted)
 
-        # 6. Capture post-trade state.
+        # 7. Capture post-trade state.
         post_positions = self.adapter.get_positions()
         post_by_symbol = {p.symbol: p.qty for p in post_positions}
         turnover = sum(
